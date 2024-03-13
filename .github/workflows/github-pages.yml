@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      - name: Install dependencies
+        run: yarn install
       - name: Compile
         run: tsc
       - name: Upload artifact
