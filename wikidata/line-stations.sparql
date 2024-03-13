@@ -1,0 +1,28 @@
+SELECT DISTINCT
+  ?line
+    ?lineLabel
+    ?line_en
+    ?lineLogo
+    ?lineOperator
+    ?lineRouteNumber
+  ?station
+    ?stationLabel
+    ?station_en
+    ?stationCode
+    ?stationCoordinate
+WHERE {
+  ?line wdt:P31 wd:Q728937 .
+  ?line wdt:P17 wd:Q17 .
+  ?station wdt:P81 ?line .
+
+  OPTIONAL { ?line wdt:P154 ?lineLogo }
+  OPTIONAL { ?line wdt:P137 ?lineOperator }
+  OPTIONAL { ?line wdt:P1671 ?lineRouteNumber }
+  OPTIONAL { ?station wdt:P625 ?stationCoordinate }
+  OPTIONAL { ?station wdt:P296 ?stationCode }
+
+  OPTIONAL { ?station rdfs:label ?station_en filter (lang(?station_en) = "en") }.
+  OPTIONAL { ?line rdfs:label ?line_en filter (lang(?line_en) = "en") }.
+
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "ja" }
+}

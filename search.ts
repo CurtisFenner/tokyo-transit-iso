@@ -215,6 +215,32 @@ function formatTime(time: number): string {
 async function main() {
 	const matrices = await loadMatrices();
 
+	const wikidata = await loadWikidata();
+
+	console.log(matrices);
+
+	const wikiStations: (WikidataStation | null)[] = [];
+	for (const station of matrices.stations) {
+		if (!station.coordinate) {
+			console.error("missing coordinate:", station);
+			continue;
+		}
+
+		const nearby = wikidata.nearbyStation(station, { radiusKm: 4 });
+		wikiStations.push(nearby);
+	}
+
+	const wikiLines = [];
+	for (const line of matrices.lines) {
+		const match = wikidata.matchLine(
+			line,
+			line.stops.map(stop => wikiStations[stop]).filter(x => x) as WikidataStation[],
+		);
+		wikiLines.push(match);
+	}
+
+	console.log("matched lines:", wikiLines.filter(x => x).length, "/", matrices.lines.length);
+
 	const before = performance.now();
 	const walking = walkingMatrix(matrices);
 	const after = performance.now();
@@ -258,15 +284,28 @@ async function main() {
 					const trainSpan = document.createElement("span");
 					trainSpan.className = "train";
 
+					let logoUrl = null;
+
 					if (!trainDescription) {
-						trainSpan.textContent = ("train unknown");
+						trainSpan.textContent = ("ERROR");
 					} else {
 						const lineName = matrices.lines[trainDescription.line].name;
 						const serviceName = trainDescription.service;
 
-						trainSpan.textContent = ("train " + lineName + " [" + serviceName + "]");
+						trainSpan.textContent = lineName + " [" + serviceName + "]";
+
+						logoUrl = wikiLines[trainDescription.line]?.lineLogo;
 					}
 					routeTd.prepend(trainSpan);
+
+					if (logoUrl) {
+						const img = document.createElement("img");
+						img.className = "inline-logo";
+						img.src = logoUrl;
+						routeTd.prepend(" ");
+						routeTd.prepend(img);
+					}
+
 				} else {
 					routeTd.prepend("walk");
 				}
