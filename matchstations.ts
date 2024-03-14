@@ -19,6 +19,7 @@ type WikidataLine = {
 	lineOperator?: string,
 
 	stations: Set<string>,
+	qID: string,
 };
 
 type WikidataStation = {
@@ -53,6 +54,7 @@ class Wikidata {
 					lineLabel: row.lineLabel,
 					lineOperator: row.lineOperator,
 					stations: new Set(),
+					qID: row.line.match(/Q[0-9]+/)![0],
 				});
 			}
 			this.lines.get(row.line)!.stations.add(row.station);

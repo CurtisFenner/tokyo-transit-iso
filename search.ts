@@ -217,6 +217,14 @@ async function main() {
 
 	const wikidata = await loadWikidata();
 
+	const logoAtlasRectangles = await fetchLogoAtlasRectangles();
+	const logoAtlas = await new Promise<HTMLImageElement>((resolve, reject) => {
+		const img = document.createElement("img");
+		img.src = "wikidata/logos.png";
+		img.onload = () => resolve(img);
+		img.onerror = reject;
+	});
+
 	console.log(matrices);
 
 	const wikiStations: (WikidataStation | null)[] = [];
@@ -230,6 +238,8 @@ async function main() {
 		wikiStations.push(nearby);
 	}
 
+	const lineColors: Color[] = [];
+	const lineLogos: (string | null)[] = [];
 	const wikiLines = [];
 	for (const line of matrices.lines) {
 		const match = wikidata.matchLine(
@@ -237,6 +247,22 @@ async function main() {
 			line.stops.map(stop => wikiStations[stop]).filter(x => x) as WikidataStation[],
 		);
 		wikiLines.push(match);
+
+		const logoRectangle = logoAtlasRectangles[match?.qID || ""];
+		if (logoRectangle) {
+			const canvas = document.createElement("canvas");
+			canvas.width = logoRectangle.right - logoRectangle.left;
+			canvas.height = logoRectangle.bottom - logoRectangle.top;
+			const ctx = canvas.getContext("2d")!;
+			ctx.drawImage(logoAtlas, -logoRectangle.left, -logoRectangle.top);
+			const src = canvas.toDataURL();
+			const img = await imagePromise(src);
+			lineColors.push(await getImageColor(img));
+			lineLogos.push(img.src);
+		} else {
+			lineColors.push({ r: 102, g: 102, b: 102 });
+			lineLogos.push(null);
+		}
 	}
 
 	console.log("matched lines:", wikiLines.filter(x => x).length, "/", matrices.lines.length);
@@ -294,8 +320,10 @@ async function main() {
 
 						trainSpan.textContent = lineName + " [" + serviceName + "]";
 
-						logoUrl = wikiLines[trainDescription.line]?.lineLogo;
+						logoUrl = lineLogos[trainDescription.line];
 					}
+					trainSpan.style.background = toCSSColor(lineColors[trainDescription.line]);
+					trainSpan.style.color = contrastingColor(lineColors[trainDescription.line]);
 					routeTd.prepend(trainSpan);
 
 					if (logoUrl) {
@@ -305,7 +333,6 @@ async function main() {
 						routeTd.prepend(" ");
 						routeTd.prepend(img);
 					}
-
 				} else {
 					routeTd.prepend("walk");
 				}

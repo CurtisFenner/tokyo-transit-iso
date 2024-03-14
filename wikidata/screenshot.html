@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<style>
+	body {
+		background: black;
+		padding: 1in;
+		color: white;
+	}
+
+	canvas {
+		background: white;
+		border: 2px solid limegreen;
+	}
+
+	pre {
+		background: gray;
+	}
+</style>
+
+<body>
+	This page makes it easy to capture all of the logos as a single raster image.<br>
+
+	<textarea id="pre" style="width: 100%"></textarea>
+	<br>
+	<canvas id="canvas"></canvas>
+	<script>
+		async function nondownload() {
+			const f = await fetch("line-stations.json");
+			const wikidata = await f.json();
+			const index = {};
+			for (const line of wikidata) {
+				if (!line.lineLogo) {
+					continue;
+				}
+
+				const qid = line.line.match(/Q\d+/)[0];
+				if (index[qid]) continue;
+
+				// const dotExtension = line.lineLogo.match(/\.[^.]+$/)[0];
+				// const destination = `${folder}/${qid}${dotExtension}`;
+
+				index[qid] = line.lineLogo;
+			}
+			return index;
+		}
+
+		async function main() {
+			// const f = await fetch("downloaded/index.json");
+			// const index = await f.json();
+			const index = await nondownload();
+
+			const height = 64;
+
+			const imagePromises = Object.entries(index).map(([qid, url]) => {
+				const image = document.createElement("img");
+				image.src = url;
+				return new Promise((resolve, reject) => {
+					image.onload = () => resolve({ qid, image });
+					image.onerror = reject;
+				});
+			});
+
+			const images = await Promise.all(imagePromises);
+			for (const {qid, image} of images) {
+				const ratio = image.width / image.height;
+				image.height = height;
+				image.width = height * ratio;
+			}
+
+			console.log("images:", images);
+			const widest = Math.max(...images.map(x => x.image.width));
+			canvas.width = widest;
+			canvas.height = height * images.length;
+			const ctx = canvas.getContext("2d");
+
+			const describe = images.map((x, i) => {
+				const img = x.image;
+				ctx.drawImage(img, 0, i * height, img.width, img.height);
+				return [
+					x.qid,
+					{
+						left: 0,
+						top: i * height,
+						right: img.width,
+						bottom: (i + 1) * height,
+					}
+				];
+			});
+
+			pre.textContent = JSON.stringify(Object.fromEntries(describe));
+		}
+
+		main();
+
+	</script>

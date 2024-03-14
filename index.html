@@ -71,15 +71,27 @@ section > *:first-child {
     vertical-align: middle;
 }
 
+.panel {
+    user-select: text;
+    width: 35rem;
+}
+
+@media only screen and (max-width: 43rem) {
+    .panel {
+        width: calc(100vw - 3rem);
+    }
+}
+
 		</style>
     </head>
     <body>
         <div style="position: fixed; width: 100%; height: 100%;">
             <div id="map" style="position: relative; width: 100%; height: 100%"></div>
         </div>
-        <section id="panel" class="scroll-y" style="position: fixed; right: 0; top: 0; bottom: 0; width: 30rem; min-width: 26rem; max-width: 30vw;">
+        <section id="panel" class="panel scroll-y" style="position: fixed; right: 0; top: 0; bottom: 0;">
             <h1>Routes from <ruby>渋谷<rt>しぶや</rt></ruby></h1>
         </section>
+        <script src="compiled/images.js"></script>
 		<script src="compiled/matchstations.js"></script>
 		<script src="compiled/search.js"></script>
     </body>
