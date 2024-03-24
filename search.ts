@@ -1,47 +1,3 @@
-type Coordinate = { lat: number, lon: number };
-
-type MatrixTrainLabel = {
-	service: string,
-	destination: string | null,
-	line: number,
-};
-
-type MatrixTime = {
-	to: number,
-	minutes: number;
-	services: {
-		effectiveInterval: number;
-		expectedWaitAndTransit: number;
-		trainService: MatrixTrainLabel;
-	}[],
-};
-
-type Matrix = {
-	embarkMinutes: [number, number],
-	times: MatrixTime[][],
-};
-
-type MatrixStation = {
-	name: string,
-	kana: string,
-	coordinate: Coordinate | null,
-};
-
-type MatrixLine = {
-	name: string,
-	stops: number[],
-	en: string | undefined, logo?: string, logo2?: string,
-};
-
-/**
- * This is the type of `generated/matrix.json`.
- */
-type Matrices = {
-	stations: MatrixStation[],
-	lines: MatrixLine[],
-	matrices: Matrix[],
-};
-
 function toSpherical(coordinate: Coordinate) {
 	const latRad = Math.PI * 2 * coordinate.lat / 360;
 	const lonRad = Math.PI * 2 * coordinate.lon / 360;
@@ -70,8 +26,7 @@ function toTimestamp(n: number) {
 const map = L.map('map', {
 	attributionControl: false,
 }).setView([35.662, 139.724], 13);
-L.tileLayer(
-	"https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {
+L.tileLayer("https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {
 	maxZoom: 19,
 }).addTo(map);
 
@@ -84,7 +39,7 @@ L.control.attribution({
 }).addTo(map);
 
 async function loadMatrices(): Promise<Matrices> {
-	const f = await fetch("generated/matrix.json.gz");
+	const f = await fetch("generated/morning-matrix.json.gz");
 	const gzipBlob = await f.blob();
 	const decompressedStream = gzipBlob.stream().pipeThrough(new DecompressionStream("gzip"));
 	const decompressedBlob = await new Response(decompressedStream).json();
@@ -137,7 +92,12 @@ function groupBy<K extends string, V>(seq: V[], f: (v: V) => K): Record<K, V[]> 
 	return out;
 }
 
-function dijkstras(trainMatrix: Matrix, walkingMatrix: [StationOffset, number][][], stationOffset: StationOffset, matrices: Matrices) {
+function dijkstras(
+	trainMatrix: Matrix,
+	walkingMatrix: [StationOffset, number][][],
+	stationOffset: StationOffset,
+	matrices: Matrices,
+) {
 	const trainPenaltyMinutes = 3;
 	const walkPenaltyMinutes = 1;
 
@@ -147,7 +107,7 @@ function dijkstras(trainMatrix: Matrix, walkingMatrix: [StationOffset, number][]
 		time: number,
 		parent: null
 		| { via: "walk", from: StationOffset }
-		| { via: "train", train: MatrixTrainLabel[], from: StationOffset },
+		| { via: "train", train: MatrixDistance, from: StationOffset },
 	}[] = [];
 	visited[stationOffset] = { time: 0, parent: null };
 	const queue = [{ stationOffset, time: 0 }];
@@ -155,6 +115,11 @@ function dijkstras(trainMatrix: Matrix, walkingMatrix: [StationOffset, number][]
 		queue.sort((a, b) => b.time - a.time);
 		const top = queue.pop()!;
 		searchLog.push(top);
+
+		const station = matrices.stations[top.stationOffset];
+		if (earthGreatCircleDistanceKm(station.coordinate, { lat: 35.658514, lon: 139.70133 }) > 150) {
+			continue;
+		}
 
 		// visited[top] must already be updated.
 
@@ -173,19 +138,19 @@ function dijkstras(trainMatrix: Matrix, walkingMatrix: [StationOffset, number][]
 			}
 		}
 
-		for (const neighbor of trainMatrix.times[top.stationOffset]) {
+		for (const neighbor of trainMatrix.distances[top.stationOffset]) {
 			if (!neighbor.minutes) {
 				// A null or 0 should be ignored.
 				continue;
 			}
 
 			const arrivalStationOffset = neighbor.to;
-			const arrivalTime = top.time + neighbor.minutes + trainPenaltyMinutes;
+			const arrivalTime = top.time + neighbor.minutes.avg + trainPenaltyMinutes;
 			if (!visited[arrivalStationOffset] || visited[arrivalStationOffset].time > arrivalTime) {
 				visited[arrivalStationOffset] = {
 					parent: {
 						via: "train",
-						train: neighbor.services.map(x => x.trainService),
+						train: neighbor,
 						from: top.stationOffset,
 					},
 					time: arrivalTime,
@@ -198,7 +163,13 @@ function dijkstras(trainMatrix: Matrix, walkingMatrix: [StationOffset, number][]
 	return visited;
 }
 
-function pluralize(count: number, singular: string, plural = singular + "s") {
+function pluralize(
+	count: number,
+	singular: string,
+	plural = singular.match(/([sxz]|[cs]h)$/)
+		? singular + "es"
+		: singular + "s",
+) {
 	return count === 1
 		? `1 ${singular}`
 		: `${count} ${plural}`;
@@ -224,48 +195,6 @@ async function main() {
 		img.onload = () => resolve(img);
 		img.onerror = reject;
 	});
-
-	console.log(matrices);
-
-	const wikiStations: (WikidataStation | null)[] = [];
-	for (const station of matrices.stations) {
-		if (!station.coordinate) {
-			console.error("missing coordinate:", station);
-			continue;
-		}
-
-		const nearby = wikidata.nearbyStation(station, { radiusKm: 4 });
-		wikiStations.push(nearby);
-	}
-
-	const lineColors: Color[] = [];
-	const lineLogos: (string | null)[] = [];
-	const wikiLines = [];
-	for (const line of matrices.lines) {
-		const match = wikidata.matchLine(
-			line,
-			line.stops.map(stop => wikiStations[stop]).filter(x => x) as WikidataStation[],
-		);
-		wikiLines.push(match);
-
-		const logoRectangle = logoAtlasRectangles[match?.qID || ""];
-		if (logoRectangle) {
-			const canvas = document.createElement("canvas");
-			canvas.width = logoRectangle.right - logoRectangle.left;
-			canvas.height = logoRectangle.bottom - logoRectangle.top;
-			const ctx = canvas.getContext("2d")!;
-			ctx.drawImage(logoAtlas, -logoRectangle.left, -logoRectangle.top);
-			const src = canvas.toDataURL();
-			const img = await imagePromise(src);
-			lineColors.push(await getImageColor(img));
-			lineLogos.push(img.src);
-		} else {
-			lineColors.push({ r: 102, g: 102, b: 102 });
-			lineLogos.push(null);
-		}
-	}
-
-	console.log("matched lines:", wikiLines.filter(x => x).length, "/", matrices.lines.length);
 
 	const before = performance.now();
 	const walking = walkingMatrix(matrices);
@@ -306,7 +235,7 @@ async function main() {
 					break;
 				}
 				if (node.parent.via === "train") {
-					const trainDescription = node.parent.train[0];
+					const trainDescription = node.parent.train.route[0];
 					const trainSpan = document.createElement("span");
 					trainSpan.className = "train";
 
@@ -315,15 +244,17 @@ async function main() {
 					if (!trainDescription) {
 						trainSpan.textContent = ("ERROR");
 					} else {
-						const lineName = matrices.lines[trainDescription.line].name;
+						trainSpan.setAttribute("data-train-route", JSON.stringify(node.parent.train.route));
+						const lineName = matrices.lines[trainDescription.line || -1]?.name;
 						const serviceName = trainDescription.service;
 
-						trainSpan.textContent = lineName + " [" + serviceName + "]";
+						trainSpan.textContent = lineName + (
+							serviceName
+								? " [" + serviceName + "]"
+								: "");
 
-						logoUrl = lineLogos[trainDescription.line];
+						logoUrl = null;
 					}
-					trainSpan.style.background = toCSSColor(lineColors[trainDescription.line]);
-					trainSpan.style.color = contrastingColor(lineColors[trainDescription.line]);
 					routeTd.prepend(trainSpan);
 
 					if (logoUrl) {
@@ -350,6 +281,50 @@ async function main() {
 	}
 
 	document.getElementById("panel")!.appendChild(table);
+
+	const stationIcon = L.icon({
+		iconUrl: "dot.png",
+		iconSize: [32, 32],
+		shadowUrl: "dot-shadow.png",
+		shadowSize: [32, 32],
+	});
+
+	const walkLineOptions: L.PolylineOptions = {
+		dashArray: "4 8",
+	};
+	const trainLineOptions: L.PolylineOptions = {
+	};
+
+	for (const reached of reachable.filter(x => x.time < 60 * 4.5)) {
+		const station = matrices.stations[reached.i];
+
+		L.marker([station.coordinate.lat, station.coordinate.lon], { icon: stationIcon })
+			.addTo(map)
+			.bindTooltip(station.name + " in " + pluralize(Math.round(reached.time), "minute"));
+
+		const parent = reached.parent;
+		if (parent) {
+			const parentStation = matrices.stations[parent.from];
+			if (parent?.via === "train") {
+				const line: [number, number][] = [];
+				for (const stop of parent.train.route) {
+					const viaStation = matrices.stations[stop.departing];
+					line.push([viaStation.coordinate.lat, viaStation.coordinate.lon]);
+				}
+				line.push([station.coordinate.lat, station.coordinate.lon]);
+				console.log("from", parent.from, "to", reached.i, "via", parent.train.route.map(x => x.departing));
+				L.polyline(line, trainLineOptions)
+					.addTo(map);
+			} else if (parent?.via === "walk") {
+				const line: [number, number][] = [
+					[station.coordinate.lat, station.coordinate.lon],
+					[parentStation.coordinate.lat, parentStation.coordinate.lon],
+				];
+				L.polyline(line, walkLineOptions)
+					.addTo(map);
+			}
+		}
+	}
 }
 
 main();
