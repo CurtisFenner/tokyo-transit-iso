@@ -173,12 +173,23 @@ class Wikidata {
 				const lineCovered = wikiStations.filter(x => candidateStations.includes(x))
 				return {
 					candidateLine,
+					candidateCovered,
+					lineCovered,
 					score: (candidateCovered.length / line.stops.length) * (lineCovered.length / line.stops.length),
 				};
-			});
+			}).sort((a, b) => b.score - a.score);
+
+			// console.log("match", line.name);
+			// console.log("candidates:");
+			// for (const c of choices) {
+			// 	console.log("\t" + c.candidateLine.lineLabel, c.candidateCovered.length + "/" + c.candidateLine.stations.size, "v", c.lineCovered.length + "/" + new Set(line.stops).size);
+			// 	console.log("\t\tmissing ", [...c.candidateLine.stations].map(stationKey => this.stations.get(stationKey)).filter(x => x && !wikiStations.includes(x)).map(x => x?.stationLabel));
+			// }
+			// console.log(choices.length, choices[0]?.score, choices[1]?.score);
+
 			if (choices.length === 0) {
 				continue;
-			} else if (choices[0].score < 0.249) {
+			} else if (choices[0].score < 0.085) {
 				continue;
 			} else if (choices.length >= 2 && choices[1].score > choices[0].score / 2) {
 				continue;
