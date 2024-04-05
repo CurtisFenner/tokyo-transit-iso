@@ -183,23 +183,48 @@ function formatTime(time: number): string {
 	}
 }
 
+function sleep(ms: number): Promise<number> {
+	const before = performance.now();
+	return new Promise(resolve => {
+		setTimeout(() => {
+			const after = performance.now();
+			resolve(after - before);
+		}, ms);
+	});
+}
+
+const loadingMessage = document.getElementById("loading-message")!;
+
 async function main() {
+	loadingMessage.textContent = "Waiting for train station map...";
 	const matrices = await loadMatrices();
 
-	const wikidata = await loadWikidata();
+	loadingMessage.textContent = "Waiting for localization...";
 
-	const logoAtlasRectangles = await fetchLogoAtlasRectangles();
-	const logoAtlas = await new Promise<HTMLImageElement>((resolve, reject) => {
-		const img = document.createElement("img");
-		img.src = "wikidata/logos.png";
-		img.onload = () => resolve(img);
-		img.onerror = reject;
-	});
+	const wikidata = await loadWikidata();
+	wikidata.matchStations(matrices.stations);
+	console.log(wikidata.matchedStations.size, "of", matrices.stations.length, "stations matched");
+	wikidata.matchLines(matrices);
+	console.log(wikidata.matchedLines.size, "of", matrices.lines.length, "lines matched");
+
+	await sleep(60);
+	loadingMessage.textContent = "Waiting for logos...";
+	await sleep(60);
+
+	const lineLogos = await loadLineLogos();
+
+	await sleep(60);
+	loadingMessage.textContent = "Calculating walking distances...";
+	await sleep(60);
 
 	const before = performance.now();
 	const walking = walkingMatrix(matrices);
 	const after = performance.now();
 	console.log(after - before, "ms calculating walking:", walking);
+
+	await sleep(60);
+	loadingMessage.textContent = "Calculating travel times...";
+	await sleep(60);
 
 	const SHIBUYA = matrices.stations.findIndex(x => x.name.includes("渋谷"))!;
 	const beforeDijkstras = performance.now();
@@ -212,7 +237,7 @@ async function main() {
 	console.log("FROM SHIBUYA:", reachable);
 	const table = document.createElement("table");
 	for (const v of reachable.filter(x => x).sort((a, b) => a.time - b.time)) {
-		if (v.time) {
+		if (v.time && v.time < 60 * 2.5) {
 			const i = v.i;
 			const row = document.createElement("tr");
 			const th = document.createElement("th");
@@ -226,9 +251,10 @@ async function main() {
 			let node = v;
 			let iterations = 0;
 			while (node) {
+				routeTd.prepend(document.createTextNode("@ " + formatTime(node.time)));
 				const station = document.createElement("span");
+				station.textContent = matrices.stations[node.i].name;
 				station.className = "station";
-				station.textContent = matrices.stations[node.i].name + " @ " + formatTime(node.time);
 				routeTd.prepend(station);
 
 				if (!node.parent) {
@@ -245,7 +271,18 @@ async function main() {
 						trainSpan.textContent = ("ERROR");
 					} else {
 						trainSpan.setAttribute("data-train-route", JSON.stringify(node.parent.train.route));
-						const lineName = matrices.lines[trainDescription.line || -1]?.name;
+						const trainLine = matrices.lines[trainDescription.line || -1]
+						const lineName = trainLine?.name;
+						if (trainLine) {
+							const wikiLine = wikidata.matchedLines.get(trainLine);
+							if (wikiLine) {
+								const lineLogo = lineLogos.get(wikiLine.qID);
+								if (lineLogo) {
+									trainSpan.style.backgroundColor = toCSSColor(lineLogo.color);
+									trainSpan.style.color = contrastingColor(lineLogo.color);
+								}
+							}
+						}
 						const serviceName = trainDescription.service;
 
 						trainSpan.textContent = lineName + (
@@ -280,6 +317,8 @@ async function main() {
 		}
 	}
 
+	loadingMessage.textContent = "";
+
 	document.getElementById("panel")!.appendChild(table);
 
 	const stationIcon = L.icon({
@@ -312,7 +351,6 @@ async function main() {
 					line.push([viaStation.coordinate.lat, viaStation.coordinate.lon]);
 				}
 				line.push([station.coordinate.lat, station.coordinate.lon]);
-				console.log("from", parent.from, "to", reached.i, "via", parent.train.route.map(x => x.departing));
 				L.polyline(line, trainLineOptions)
 					.addTo(map);
 			} else if (parent?.via === "walk") {

@@ -9,6 +9,42 @@ async function fetchLogoAtlasRectangles(): Promise<Record<string, Rect>> {
 	return await f.json();
 }
 
+async function loadLineLogos(): Promise<Map<string, { src: string; color: Color; }>> {
+	const logoAtlasRectangles = await fetchLogoAtlasRectangles();
+	const logoAtlas = await imagePromise("wikidata/logos.png");
+
+	const canvas = document.createElement("canvas");
+	canvas.width = logoAtlas.width;
+	canvas.height = 64;
+	canvas.style.display = "hidden";
+	document.body.appendChild(canvas);
+	const ctx = canvas.getContext("2d");
+	if (!ctx) {
+		console.error("RenderingContext2D could not be made");
+		return new Map();
+	}
+
+	const out = new Map<string, { src: string, color: Color }>();
+	for (const [key, portion] of Object.entries(logoAtlasRectangles)) {
+		const portionWidth = portion.right - portion.left;
+		const portionHeight = portion.bottom - portion.top;
+		const destinationWidth = Math.floor(canvas.height / portionHeight * portionWidth);
+		canvas.width = destinationWidth;
+		ctx.clearRect(-1, -1, canvas.width + 2, canvas.height + 2);
+		ctx.drawImage(logoAtlas, portion.left, portion.top, portionWidth, portionHeight, 0, 0, destinationWidth, canvas.height);
+		const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve));
+		if (!blob) {
+			continue;
+		}
+		const img = await imagePromise(URL.createObjectURL(blob));
+		const color = await getImageColor(img);
+		out.set(key, { color, src: img.src });
+	}
+
+	canvas.parentElement?.removeChild(canvas);
+	return out;
+}
+
 function imagePromise(src: string): Promise<HTMLImageElement> {
 	return new Promise((resolve, reject) => {
 		const img = document.createElement("img");
@@ -35,8 +71,8 @@ async function getImageColor(image: HTMLImageElement): Promise<Color> {
 	});
 
 	const canvas = document.createElement("canvas");
-	canvas.width = 80;
-	canvas.height = 80;
+	canvas.width = 20;
+	canvas.height = 20;
 	const ctx = canvas.getContext("2d");
 	if (!ctx) {
 		throw new Error("canvas is not supported");

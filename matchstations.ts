@@ -28,22 +28,45 @@ type WikidataStation = {
 	stationLabel: string,
 	stationCode?: string,
 	stationCoordinate?: string,
-	coordinate?: Coordinate,
+	coordinate: Coordinate,
 
 	lines: Set<string>,
 };
 
 function cleanStationName(name: string): string {
-	return name.replace(/\s+/g, "").replace(/\([^()]+\)/g, "").replace(/駅$/g, "");
+	return name.replace(/\s+/g, "").replace(/[(〔][^()]+[\)〕]/g, "").replace(/駅$/g, "").normalize("NFKD");
 }
 
 function cleanLineName(name: string): string {
-	return name.replace(/\s+/g, "").replace(/\([^()]+\)/g, "").replace(/(線|ライン)$/g, "");
+	return name.replace(/\s+/g, "").replace(/[(〔][^()]+[\)〕]/g, "").replace(/(線|ライン)$/g, "").normalize("NFKD");
 }
+
+function toTile(zoom: number, coordinate: Coordinate): {
+	x: number, y: number,
+	ix: number, iy: number,
+} {
+	const x3857 = coordinate.lon;
+	const latRad = coordinate.lat * Math.PI / 180;
+	const y3857 = Math.log(Math.tan(latRad) + 1 / Math.cos(latRad));
+	const x = 0.5 + x3857 / 360;
+	const y = 0.5 - y3857 / (2 * Math.PI);
+	const n = 2 ** zoom;
+	return {
+		x: n * x,
+		y: n * y,
+		ix: Math.floor(n * x),
+		iy: Math.floor(n * y),
+	};
+}
+
+const hachiko = { lon: 139.7006793, lat: 35.6590699 };
 
 class Wikidata {
 	private lines = new Map<string, WikidataLine>();
 	private stations = new Map<string, WikidataStation>();
+
+	private stationsByGrid17 = new Map<string, (WikidataStation)[]>();
+
 	constructor(public readonly rows: WikidataRow[]) {
 		for (const row of rows) {
 			if (!this.lines.has(row.line)) {
@@ -69,10 +92,9 @@ class Wikidata {
 				continue;
 			}
 
-
 			const coordinate: Coordinate = {
-				lat: parseFloat(match[2]),
 				lon: parseFloat(match[1]),
+				lat: parseFloat(match[2]),
 			};
 
 			if (!this.stations.has(row.station)) {
@@ -89,50 +111,89 @@ class Wikidata {
 			}
 			this.stations.get(row.station)!.lines.add(row.line);
 		}
+
+		for (const station of this.stations.values()) {
+			if (!station.coordinate) {
+				console.error("new Wikidata:", station, "is missing coordinates");
+				continue;
+			}
+			const tileID = this.tileID17(station.coordinate);
+			const gridTile = this.stationsByGrid17.get(tileID) || [];
+			gridTile.push(station);
+			this.stationsByGrid17.set(tileID, gridTile);
+		}
 	}
 
-	matchLine(query: MatrixLine, incident: WikidataStation[]): WikidataLine | null {
-		const matches = [...this.lines.values()].filter(x => cleanLineName(x.lineLabel) === cleanLineName(query.name));
-		if (matches.length === 1) {
-			return matches[0];
-		}
+	tileID17(coordinate: Coordinate): string {
+		const tile = toTile(17, coordinate);
+		return `${tile.ix}/${tile.iy}`;
+	}
 
-		// Are there 3 stations in incident that are unique to one line?
-		const lines: Record<string, number> = {};
-		for (const station of incident) {
-			for (const line of station.lines) {
-				lines[line] = (lines[line] || 0) + 1;
+	stationsInNeighborhood(query: Coordinate) {
+		const [ix, iy] = this.tileID17(query).split("/");
+		const out: Record<string, WikidataStation[] | undefined> = {};
+		for (let u = -1; u <= 1; u++) {
+			for (let v = -1; v <= 1; v++) {
+				const neighbor = `${parseInt(ix) + u}/${parseInt(iy) + v}`;
+				const grid = this.stationsByGrid17.get(neighbor);
+				out[neighbor] = grid;
 			}
 		}
-
-		const hits = Object.entries(lines)
-			.sort((a, b) => b[1] - a[1]);
-		if (
-			(hits.length === 1 && hits[0][1] >= 3)
-			|| (hits.length >= 2 && hits[0][1] >= 3 && hits[1][1] < 3)
-			|| (hits.length >= 2 && hits[0][1] > 3 * hits[1][1])
-			|| (hits.length >= 1 && hits[0][1] === query.stops.length && (hits.length === 1 || hits[1][1] < hits[0][1]))
-		) {
-			return this.lines.get(hits[0][0])!;
-		}
-
-		return null;
+		return out;
 	}
 
-	nearbyStation(query: MatrixStation, p: { radiusKm: number }): WikidataStation | null {
+	matchedStations = new Map<MatrixStation, WikidataStation>();
+	matchStations(stations: MatrixStation[]): void {
+		for (const station of stations) {
+			const nearby = this.nearbyStations(station, { radiusKm: 2 });
+			const namesMatch = nearby.filter(x => cleanStationName(x.stationLabel) === cleanStationName(station.name));
+
+			if (namesMatch.length === 1) {
+				this.matchedStations.set(station, namesMatch[0]);
+			}
+		}
+	}
+
+	matchedLines = new Map<MatrixLine, WikidataLine>();
+	matchLines(matrices: Matrices) {
+		for (const line of matrices.lines) {
+			const wikiStations: WikidataStation[] = [];
+			for (const stationID of new Set(line.stops)) {
+				const station = matrices.stations[stationID];
+				const wikiStation = this.matchedStations.get(station);
+				if (wikiStation !== undefined) {
+					wikiStations.push(wikiStation);
+				}
+			}
+			const candidateLineIDs = new Set(wikiStations.flatMap(w => [...w.lines]));
+			const candidateLines = [...candidateLineIDs].map(x => this.lines.get(x)!);
+			const choices = candidateLines.map(candidateLine => {
+				const candidateStations = [...candidateLine.stations].map(stationKey => this.stations.get(stationKey)!);
+				const candidateCovered = candidateStations.filter(x => wikiStations.includes(x));
+				const lineCovered = wikiStations.filter(x => candidateStations.includes(x))
+				return {
+					candidateLine,
+					score: (candidateCovered.length / line.stops.length) * (lineCovered.length / line.stops.length),
+				};
+			});
+			if (choices.length === 0) {
+				continue;
+			} else if (choices[0].score < 0.249) {
+				continue;
+			} else if (choices.length >= 2 && choices[1].score > choices[0].score / 2) {
+				continue;
+			}
+			this.matchedLines.set(line, choices[0].candidateLine);
+		}
+	}
+
+	nearbyStations(query: MatrixStation, p: { radiusKm: number }): WikidataStation[] {
 		if (!query.coordinate) {
-			return null;
+			return [];
 		}
 
-		const located = [...this.stations.values()].filter(x => x.coordinate) as (WikidataStation & { coordinate: Coordinate })[];
-		const nearby = located
-			.filter(x => earthGreatCircleDistanceKm(x.coordinate, query.coordinate!) < p.radiusKm)
-			.filter(x => cleanStationName(x.stationLabel) === cleanStationName(query.name));
-
-		if (nearby.length === 1) {
-			return nearby[0];
-		}
-		return null;
+		return Object.entries(this.stationsInNeighborhood(query.coordinate)).map(([_, x]) => x || []).flat()
+			.filter(x => earthGreatCircleDistanceKm(x.coordinate, query.coordinate!) < p.radiusKm);
 	}
 }
 
