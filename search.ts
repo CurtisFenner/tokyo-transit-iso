@@ -51,6 +51,7 @@ type StationOffset = number;
 function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
 	const STANDARD_WALKING_SPEED_KPH = 4.5;
 	const MAX_MINUTES = 30;
+	const maxKm = MAX_MINUTES * STANDARD_WALKING_SPEED_KPH * 60;
 	let count = 0;
 
 	const walkingTransfers: [StationOffset, number][][] = [];
@@ -58,14 +59,18 @@ function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
 		walkingTransfers[i] = [];
 	}
 
+	const spatial = new Spatial<MatrixStation>(12);
+	const indices = new Map<MatrixStation, number>();
+	for (let i = 0; i < matrices.stations.length; i++) {
+		indices.set(matrices.stations[i], i);
+		spatial.add(matrices.stations[i]);
+	}
+
 	for (let from = 0; from < matrices.stations.length; from++) {
 		const fromStation = matrices.stations[from];
-		if (!fromStation.coordinate) continue;
 
-		for (let to = 0; to < from; to++) {
-			const toStation = matrices.stations[to];
-			if (!toStation.coordinate) continue;
-
+		for (const toStation of spatial.nearby(fromStation.coordinate, maxKm)) {
+			const to = indices.get(toStation)!;
 			const distanceKm = earthGreatCircleDistanceKm(fromStation.coordinate, toStation.coordinate);
 
 			const minutes = distanceKm / STANDARD_WALKING_SPEED_KPH * 60;
@@ -211,7 +216,16 @@ async function main() {
 	loadingMessage.textContent = "Waiting for logos...";
 	await sleep(60);
 
-	const lineLogos = await loadLineLogos();
+	const wikiLineLogos = await loadLineLogos();
+	const matrixLineLogos = [];
+	for (const line of matrices.lines) {
+		const matched = wikidata.matchedLines.get(line);
+		if (!matched) {
+			matrixLineLogos.push(undefined);
+			continue;
+		}
+		matrixLineLogos.push(wikiLineLogos.get(matched.qID));
+	}
 
 	await sleep(60);
 	loadingMessage.textContent = "Calculating walking distances...";
@@ -220,104 +234,17 @@ async function main() {
 	const before = performance.now();
 	const walking = walkingMatrix(matrices);
 	const after = performance.now();
-	console.log(after - before, "ms calculating walking:", walking);
+	console.log(after - before, "ms calculating walking");
 
 	await sleep(60);
 	loadingMessage.textContent = "Calculating travel times...";
 	await sleep(60);
 
 	const SHIBUYA = matrices.stations.findIndex(x => x.name.includes("渋谷"))!;
-	const beforeDijkstras = performance.now();
-
-	const reachable = dijkstras(matrices.matrices[0], walking, SHIBUYA, matrices)
-		.map((v, i) => ({ ...v, i }));
-	const afterDijkstras = performance.now();
-	console.log(afterDijkstras - beforeDijkstras, "ms searching");
-
-	console.log("FROM SHIBUYA:", reachable);
-	const table = document.createElement("table");
-	for (const v of reachable.filter(x => x).sort((a, b) => a.time - b.time)) {
-		if (v.time && v.time < 60 * 2.5) {
-			const i = v.i;
-			const row = document.createElement("tr");
-			const th = document.createElement("th");
-			const station = matrices.stations[i];
-			th.textContent = station.name;
-			row.appendChild(th);
-			const timeTd = document.createElement("td");
-			timeTd.textContent = formatTime(v.time);
-			row.appendChild(timeTd);
-			const routeTd = document.createElement("td");
-			let node = v;
-			let iterations = 0;
-			while (node) {
-				routeTd.prepend(document.createTextNode("@ " + formatTime(node.time)));
-				const station = document.createElement("span");
-				station.textContent = matrices.stations[node.i].name;
-				station.className = "station";
-				routeTd.prepend(station);
-
-				if (!node.parent) {
-					break;
-				}
-				if (node.parent.via === "train") {
-					const trainDescription = node.parent.train.route[0];
-					const trainSpan = document.createElement("span");
-					trainSpan.className = "train";
-
-					let logoUrl = null;
-
-					if (!trainDescription) {
-						trainSpan.textContent = ("ERROR");
-					} else {
-						trainSpan.setAttribute("data-train-route", JSON.stringify(node.parent.train.route));
-						const trainLine = matrices.lines[trainDescription.line || -1]
-						const lineName = trainLine?.name;
-						if (trainLine) {
-							const wikiLine = wikidata.matchedLines.get(trainLine);
-							if (wikiLine) {
-								const lineLogo = lineLogos.get(wikiLine.qID);
-								if (lineLogo) {
-									trainSpan.style.backgroundColor = toCSSColor(lineLogo.color);
-									trainSpan.style.color = contrastingColor(lineLogo.color);
-								}
-							}
-						}
-						const serviceName = trainDescription.service;
-
-						trainSpan.textContent = lineName + (
-							serviceName
-								? " [" + serviceName + "]"
-								: "");
-
-						logoUrl = null;
-					}
-					routeTd.prepend(trainSpan);
-
-					if (logoUrl) {
-						const img = document.createElement("img");
-						img.className = "inline-logo";
-						img.src = logoUrl;
-						routeTd.prepend(" ");
-						routeTd.prepend(img);
-					}
-				} else {
-					routeTd.prepend("walk");
-				}
-
-				node = reachable[node.parent.from];
-
-				iterations += 1;
-				if (iterations > 100) {
-					throw new Error("excessive iterations!");
-				}
-			}
-			row.appendChild(routeTd);
-			table.appendChild(row);
-		}
-	}
 
 	loadingMessage.textContent = "";
+
+	const { table, parentEdges } = renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
 
 	document.getElementById("panel")!.appendChild(table);
 
@@ -334,7 +261,7 @@ async function main() {
 	const trainLineOptions: L.PolylineOptions = {
 	};
 
-	for (const reached of reachable.filter(x => x.time < 60 * 4.5)) {
+	for (const reached of parentEdges.filter(x => x)) {
 		const station = matrices.stations[reached.i];
 
 		L.marker([station.coordinate.lat, station.coordinate.lon], { icon: stationIcon })

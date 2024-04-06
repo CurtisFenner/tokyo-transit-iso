@@ -11,7 +11,7 @@ SELECT DISTINCT
     ?stationCode
     ?stationCoordinate
 WHERE {
-  ?line wdt:P31 wd:Q728937 .
+  ?line wdt:P31/wdt:P279* wd:Q728937 .
   ?line wdt:P17 wd:Q17 .
   ?station wdt:P81 ?line .
 
