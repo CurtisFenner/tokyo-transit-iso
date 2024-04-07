@@ -44,7 +44,7 @@ function cleanLineName(name: string): string {
 }
 
 
-const hachiko = { lon: 139.7006793, lat: 35.6590699 };
+export const HACHIKO_COORDINATES = { lon: 139.7006793, lat: 35.6590699 };
 
 export class Wikidata {
 	private lines = new Map<string, WikidataLine>();

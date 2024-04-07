@@ -1,6 +1,6 @@
 import * as maplibregl from "maplibre-gl";
 import * as images from "./images";
-import { loadWikidata } from "./matchstations";
+import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
 import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
 
@@ -32,7 +32,7 @@ function toTimestamp(n: number) {
 const map = new maplibregl.Map({
 	container: document.getElementById("map")!,
 	style: '/maplibre-style.json',
-	center: [-74.5, 40],
+	center: [HACHIKO_COORDINATES.lon, HACHIKO_COORDINATES.lat],
 	zoom: 9
 });
 
@@ -260,6 +260,9 @@ async function main() {
 	// const trainLineOptions: L.PolylineOptions = {
 	// };
 
+	const pathingTrainPolyline = [];
+	const pathingWalkPolyline = [];
+
 	for (const reached of parentEdges.filter(x => x)) {
 		const station = matrices.stations[reached.i];
 
@@ -271,24 +274,44 @@ async function main() {
 		if (parent) {
 			const parentStation = matrices.stations[parent.from];
 			if (parent?.via === "train") {
-				const line: [number, number][] = [];
+				const line: Coordinate[] = [];
 				for (const stop of parent.train.route) {
 					const viaStation = matrices.stations[stop.departing];
-					line.push([viaStation.coordinate.lat, viaStation.coordinate.lon]);
+					line.push(viaStation.coordinate);
 				}
-				line.push([station.coordinate.lat, station.coordinate.lon]);
-				// L.polyline(line, trainLineOptions)
-				// 	.addTo(map);
+				line.push(station.coordinate);
+				pathingTrainPolyline.push(line);
 			} else if (parent?.via === "walk") {
-				const line: [number, number][] = [
-					[station.coordinate.lat, station.coordinate.lon],
-					[parentStation.coordinate.lat, parentStation.coordinate.lon],
-				];
-				// L.polyline(line, walkLineOptions)
-				// 	.addTo(map);
+				const line: Coordinate[] = [station.coordinate, parentStation.coordinate];
+				pathingWalkPolyline.push(line);
 			}
 		}
 	}
+
+	map.addSource("train-polyline-s", {
+		type: "geojson",
+		data: {
+			type: "Feature",
+			geometry: {
+				type: "MultiLineString",
+				coordinates: pathingTrainPolyline.map(cs => cs.map(c => [c.lon, c.lat])),
+			},
+			properties: {},
+		},
+	});
+	map.addLayer({
+		id: "train-polyline",
+		type: "line",
+		source: "train-polyline-s",
+		layout: {
+			"line-cap": "round",
+			"line-join": "round",
+		},
+		paint: {
+			"line-color": "#ABC",
+			"line-width": 2,
+		},
+	});
 }
 
 main();
