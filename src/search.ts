@@ -31,7 +31,7 @@ function toTimestamp(n: number) {
 
 const map = new maplibregl.Map({
 	container: document.getElementById("map")!,
-	style: '/maplibre-style.json',
+	style: 'maplibre-style.json',
 	center: [HACHIKO_COORDINATES.lon, HACHIKO_COORDINATES.lat],
 	zoom: 9
 });
