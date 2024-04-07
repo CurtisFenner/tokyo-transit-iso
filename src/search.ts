@@ -14,13 +14,22 @@ function toSpherical(coordinate: Coordinate) {
 	};
 }
 
+export const EARTH_RADIUS_KM = 6378.1;
 export function earthGreatCircleDistanceKm(a: Coordinate, b: Coordinate) {
-	const earthRadiusKm = 6378.1;
 	const va = toSpherical(a);
 	const vb = toSpherical(b);
 	const dot = va.x * vb.x + va.y * vb.y + va.z * vb.z;
 	const angleRad = Math.acos(dot);
-	return angleRad * earthRadiusKm;
+	return angleRad * EARTH_RADIUS_KM;
+}
+
+export function azimuthalNeighbor(center: Coordinate, angle: number, radiusKm: number): Coordinate {
+	const latDegPerKm = 360 / (EARTH_RADIUS_KM * 2 * Math.PI);
+	const lonDegPerKm = latDegPerKm / Math.cos(center.lat * Math.PI / 180);
+	return {
+		lat: center.lat + radiusKm * latDegPerKm * Math.cos(angle),
+		lon: center.lon + radiusKm * lonDegPerKm * Math.sin(angle),
+	};
 }
 
 function toTimestamp(n: number) {
@@ -38,19 +47,24 @@ const map = new maplibregl.Map({
 
 
 async function loadMatrices(): Promise<Matrices> {
-	const f = await fetch("generated/morning-matrix.json.gz");
+	const fet = fetch("generated/morning-matrix.json.gze");
+	console.log("fet:", fet);
+	const f = await fet;
+	console.log("f:", f);
 	const gzipBlob = await f.blob();
+	console.log("gzipBlob:", gzipBlob);
 	const decompressedStream = gzipBlob.stream().pipeThrough(new DecompressionStream("gzip"));
 	const decompressedBlob = await new Response(decompressedStream).json();
+	console.log("decompressedBlob", decompressedBlob);
 	return decompressedBlob as Matrices;
 }
 
 type StationOffset = number;
 
+const STANDARD_WALKING_SPEED_KPH = 4.5;
+const WALK_MAX_MIN = 30;
+const WALK_MAX_KM = WALK_MAX_MIN * STANDARD_WALKING_SPEED_KPH * 60;
 function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
-	const STANDARD_WALKING_SPEED_KPH = 4.5;
-	const MAX_MINUTES = 30;
-	const maxKm = MAX_MINUTES * STANDARD_WALKING_SPEED_KPH * 60;
 	let count = 0;
 
 	const walkingTransfers: [StationOffset, number][][] = [];
@@ -68,12 +82,12 @@ function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
 	for (let from = 0; from < matrices.stations.length; from++) {
 		const fromStation = matrices.stations[from];
 
-		for (const toStation of grid.nearby(fromStation.coordinate, maxKm)) {
+		for (const toStation of grid.nearby(fromStation.coordinate, WALK_MAX_KM)) {
 			const to = indices.get(toStation)!;
 			const distanceKm = earthGreatCircleDistanceKm(fromStation.coordinate, toStation.coordinate);
 
 			const minutes = distanceKm / STANDARD_WALKING_SPEED_KPH * 60;
-			if (minutes < MAX_MINUTES) {
+			if (minutes < WALK_MAX_MIN) {
 				walkingTransfers[from].push([to, minutes] satisfies [StationOffset, number]);
 				walkingTransfers[to].push([from, minutes] satisfies [StationOffset, number]);
 				count += 1;
@@ -202,7 +216,6 @@ const loadingMessage = document.getElementById("loading-message")!;
 async function main() {
 	loadingMessage.textContent = "Waiting for train station map...";
 	const matrices = await loadMatrices();
-
 	loadingMessage.textContent = "Waiting for localization...";
 
 	const wikidata = await loadWikidata();
@@ -247,28 +260,15 @@ async function main() {
 
 	document.getElementById("panel")!.appendChild(table);
 
-	// const stationIcon = L.icon({
-	// 	iconUrl: "dot.png",
-	// 	iconSize: [32, 32],
-	// 	shadowUrl: "dot-shadow.png",
-	// 	shadowSize: [32, 32],
-	// });
-
-	// const walkLineOptions: L.PolylineOptions = {
-	// 	dashArray: "4 8",
-	// };
-	// const trainLineOptions: L.PolylineOptions = {
-	// };
-
 	const pathingTrainPolyline = [];
 	const pathingWalkPolyline = [];
 
-	for (const reached of parentEdges.filter(x => x)) {
-		const station = matrices.stations[reached.i];
+	type Circle = { center: Coordinate, train: TrainLabel, radii: { timeMinutes: number, radiusKm: number }[] };
+	const circles: Circle[] = [];
+	const minuteIsos = [60];
 
-		// L.marker([station.coordinate.lat, station.coordinate.lon], { icon: stationIcon })
-		// 	.addTo(map)
-		// 	.bindTooltip(station.name + " in " + pluralize(Math.round(reached.time), "minute"));
+	for (const reached of parentEdges.filter(x => x && x.time < 60 * 3)) {
+		const station = matrices.stations[reached.i];
 
 		const parent = reached.parent;
 		if (parent) {
@@ -285,7 +285,69 @@ async function main() {
 				const line: Coordinate[] = [station.coordinate, parentStation.coordinate];
 				pathingWalkPolyline.push(line);
 			}
+
+			if (parent?.via === "train") {
+				const circle = {
+					center: station.coordinate,
+					radii: minuteIsos.map(timeMinutes => {
+						const hoursAfterArrival = Math.max(0, timeMinutes - reached.time) / 60;
+						const radiusKm = Math.min(WALK_MAX_KM, hoursAfterArrival * STANDARD_WALKING_SPEED_KPH);
+						return {
+							timeMinutes,
+							radiusKm,
+						};
+					}),
+					train: parent.train.route[0],
+				};
+				circles.push(circle);
+			}
 		}
+	}
+
+	const areasByLine = new Map<number | null, Coordinate[][]>();
+	for (const circle of circles) {
+		const radius = circle.radii[circle.radii.length - 1];
+		if (radius.radiusKm <= 1e-3) {
+			continue;
+		}
+
+		const poly = [];
+		const resolution = 36;
+		for (let k = 0; k <= resolution; k++) {
+			const angle = k / resolution * Math.PI * 2;
+			poly.push(azimuthalNeighbor(circle.center, angle, radius.radiusKm));
+		}
+
+		const key = circle.train.line;
+		const polys = areasByLine.get(key) || [];
+		polys.push(poly);
+		areasByLine.set(key, polys);
+	}
+
+	for (const [key, polys] of areasByLine) {
+		const sourceID = "train-radius-" + String(key);
+		map.addSource(sourceID, {
+			type: "geojson",
+			data: {
+				type: "Feature",
+				geometry: {
+					type: "MultiPolygon",
+					coordinates: polys.map(poly => [poly.map<[number, number]>(c => [c.lon, c.lat])]),
+				},
+				properties: {},
+			},
+		});
+		map.addLayer({
+			id: "train-radius-" + String(key) + "-layer",
+			type: "fill",
+			source: sourceID,
+			layout: {},
+			paint: {
+				"fill-color": images.toCSSColor(matrixLineLogos[key || -1]?.color || { r: 0, g: 0, b: 0 }),
+				"fill-opacity": 0.5,
+				"fill-outline-color": "transparent",
+			},
+		});
 	}
 
 	map.addSource("train-polyline-s", {
