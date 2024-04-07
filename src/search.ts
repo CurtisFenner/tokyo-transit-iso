@@ -1,3 +1,9 @@
+import * as maplibregl from "maplibre-gl";
+import * as images from "./images";
+import { loadWikidata } from "./matchstations";
+import { renderRoutes } from "./routes";
+import * as spatial from "./spatial";
+
 function toSpherical(coordinate: Coordinate) {
 	const latRad = Math.PI * 2 * coordinate.lat / 360;
 	const lonRad = Math.PI * 2 * coordinate.lon / 360;
@@ -8,7 +14,7 @@ function toSpherical(coordinate: Coordinate) {
 	};
 }
 
-function earthGreatCircleDistanceKm(a: Coordinate, b: Coordinate) {
+export function earthGreatCircleDistanceKm(a: Coordinate, b: Coordinate) {
 	const earthRadiusKm = 6378.1;
 	const va = toSpherical(a);
 	const vb = toSpherical(b);
@@ -23,20 +29,13 @@ function toTimestamp(n: number) {
 	return `${hours}:${minutes}`;
 }
 
-const map = L.map('map', {
-	attributionControl: false,
-}).setView([35.662, 139.724], 13);
-L.tileLayer("https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {
-	maxZoom: 19,
-}).addTo(map);
+const map = new maplibregl.Map({
+	container: document.getElementById("map")!,
+	style: '/maplibre-style.json',
+	center: [-74.5, 40],
+	zoom: 9
+});
 
-L.control.attribution({
-	position: "bottomleft",
-	prefix: [
-		'&copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a>',
-		'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>',
-	].join(" ")
-}).addTo(map);
 
 async function loadMatrices(): Promise<Matrices> {
 	const f = await fetch("generated/morning-matrix.json.gz");
@@ -59,17 +58,17 @@ function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
 		walkingTransfers[i] = [];
 	}
 
-	const spatial = new Spatial<MatrixStation>(12);
+	const grid = new spatial.Spatial<MatrixStation>(12);
 	const indices = new Map<MatrixStation, number>();
 	for (let i = 0; i < matrices.stations.length; i++) {
 		indices.set(matrices.stations[i], i);
-		spatial.add(matrices.stations[i]);
+		grid.add(matrices.stations[i]);
 	}
 
 	for (let from = 0; from < matrices.stations.length; from++) {
 		const fromStation = matrices.stations[from];
 
-		for (const toStation of spatial.nearby(fromStation.coordinate, maxKm)) {
+		for (const toStation of grid.nearby(fromStation.coordinate, maxKm)) {
 			const to = indices.get(toStation)!;
 			const distanceKm = earthGreatCircleDistanceKm(fromStation.coordinate, toStation.coordinate);
 
@@ -97,7 +96,7 @@ function groupBy<K extends string, V>(seq: V[], f: (v: V) => K): Record<K, V[]> 
 	return out;
 }
 
-function dijkstras(
+export function dijkstras(
 	trainMatrix: Matrix,
 	walkingMatrix: [StationOffset, number][][],
 	stationOffset: StationOffset,
@@ -180,7 +179,7 @@ function pluralize(
 		: `${count} ${plural}`;
 }
 
-function formatTime(time: number): string {
+export function formatTime(time: number): string {
 	if (time < 60) {
 		return pluralize(Math.floor(time), "minute");
 	} else {
@@ -216,7 +215,7 @@ async function main() {
 	loadingMessage.textContent = "Waiting for logos...";
 	await sleep(60);
 
-	const wikiLineLogos = await loadLineLogos();
+	const wikiLineLogos = await images.loadLineLogos();
 	const matrixLineLogos = [];
 	for (const line of matrices.lines) {
 		const matched = wikidata.matchedLines.get(line);
@@ -248,25 +247,25 @@ async function main() {
 
 	document.getElementById("panel")!.appendChild(table);
 
-	const stationIcon = L.icon({
-		iconUrl: "dot.png",
-		iconSize: [32, 32],
-		shadowUrl: "dot-shadow.png",
-		shadowSize: [32, 32],
-	});
+	// const stationIcon = L.icon({
+	// 	iconUrl: "dot.png",
+	// 	iconSize: [32, 32],
+	// 	shadowUrl: "dot-shadow.png",
+	// 	shadowSize: [32, 32],
+	// });
 
-	const walkLineOptions: L.PolylineOptions = {
-		dashArray: "4 8",
-	};
-	const trainLineOptions: L.PolylineOptions = {
-	};
+	// const walkLineOptions: L.PolylineOptions = {
+	// 	dashArray: "4 8",
+	// };
+	// const trainLineOptions: L.PolylineOptions = {
+	// };
 
 	for (const reached of parentEdges.filter(x => x)) {
 		const station = matrices.stations[reached.i];
 
-		L.marker([station.coordinate.lat, station.coordinate.lon], { icon: stationIcon })
-			.addTo(map)
-			.bindTooltip(station.name + " in " + pluralize(Math.round(reached.time), "minute"));
+		// L.marker([station.coordinate.lat, station.coordinate.lon], { icon: stationIcon })
+		// 	.addTo(map)
+		// 	.bindTooltip(station.name + " in " + pluralize(Math.round(reached.time), "minute"));
 
 		const parent = reached.parent;
 		if (parent) {
@@ -278,15 +277,15 @@ async function main() {
 					line.push([viaStation.coordinate.lat, viaStation.coordinate.lon]);
 				}
 				line.push([station.coordinate.lat, station.coordinate.lon]);
-				L.polyline(line, trainLineOptions)
-					.addTo(map);
+				// L.polyline(line, trainLineOptions)
+				// 	.addTo(map);
 			} else if (parent?.via === "walk") {
 				const line: [number, number][] = [
 					[station.coordinate.lat, station.coordinate.lon],
 					[parentStation.coordinate.lat, parentStation.coordinate.lon],
 				];
-				L.polyline(line, walkLineOptions)
-					.addTo(map);
+				// L.polyline(line, walkLineOptions)
+				// 	.addTo(map);
 			}
 		}
 	}

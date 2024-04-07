@@ -1,12 +1,22 @@
 {
 	"compilerOptions": {
 		"strict": true,
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"sourceMap": true,
+		"skipLibCheck": true,
+		/** Emitted by Vite; use `yarn run build`. */
+		"noEmit": true,
 		"lib": [
-			"ES2022",
-			"DOM"
+			"ES2020",
+			"DOM",
+			"DOM.Iterable"
 		],
-		"outDir": "compiled",
-		"target": "ES2022",
-		"sourceMap": true
-	}
+	},
+	"include": [
+		"src/*.ts",
+		"src/**/*.ts",
+		"src/search.ts"
+	]
 }

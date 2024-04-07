@@ -1,8 +1,11 @@
-function renderRoutes(
+import * as images from "./images";
+import { dijkstras, formatTime } from "./search";
+
+export function renderRoutes(
 	matrices: Matrices,
 	walking: [number, number][][],
 	startStationOffset: number,
-	lineLogos: Array<{ color: Color, src: string } | undefined>,
+	lineLogos: Array<{ color: images.Color, src: string } | undefined>,
 ): { table: HTMLTableElement, parentEdges: ParentEdge[] } {
 	const beforeDijkstras = performance.now();
 	const parentEdges = dijkstras(matrices.matrices[0], walking, startStationOffset, matrices)
@@ -33,7 +36,7 @@ type ParentEdge = {
 
 function renderRouteLine(
 	matrices: Matrices,
-	lineLogos: Array<{ color: Color, src: string } | undefined>,
+	lineLogos: Array<{ color: images.Color, src: string } | undefined>,
 	v: ParentEdge,
 	parentEdges: {
 		i: number;
@@ -94,8 +97,8 @@ function renderRouteLine(
 			routeTd.prepend(trainSpan);
 
 			if (lineLogo) {
-				trainSpan.style.backgroundColor = toCSSColor(lineLogo.color);
-				trainSpan.style.color = contrastingColor(lineLogo.color);
+				trainSpan.style.backgroundColor = images.toCSSColor(lineLogo.color);
+				trainSpan.style.color = images.contrastingColor(lineLogo.color);
 			}
 
 		} else {

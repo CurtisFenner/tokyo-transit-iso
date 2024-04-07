@@ -1,3 +1,5 @@
+import * as spatial from "./spatial";
+
 type WikidataRow = {
 	line: string,
 	line_en?: string,
@@ -44,11 +46,11 @@ function cleanLineName(name: string): string {
 
 const hachiko = { lon: 139.7006793, lat: 35.6590699 };
 
-class Wikidata {
+export class Wikidata {
 	private lines = new Map<string, WikidataLine>();
 	private stations = new Map<string, WikidataStation>();
 
-	private stationGrid = new Spatial<WikidataStation>(12);
+	private stationGrid = new spatial.Spatial<WikidataStation>(12);
 
 	constructor(public readonly rows: WikidataRow[]) {
 		for (const row of rows) {
@@ -168,7 +170,7 @@ class Wikidata {
 	}
 }
 
-async function loadWikidata(): Promise<Wikidata> {
+export async function loadWikidata(): Promise<Wikidata> {
 	const f = await fetch("wikidata/line-stations.json");
 	return new Wikidata(await f.json());
 }

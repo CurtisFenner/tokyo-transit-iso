@@ -1,15 +1,15 @@
-type Color = { r: number, g: number, b: number };
+export type Color = { r: number, g: number, b: number };
 
 const imageColorCache: Record<string, Color> = {};
 
-type Rect = { left: number, right: number, top: number, bottom: number };
+export type Rect = { left: number, right: number, top: number, bottom: number };
 
-async function fetchLogoAtlasRectangles(): Promise<Record<string, Rect>> {
+export async function fetchLogoAtlasRectangles(): Promise<Record<string, Rect>> {
 	const f = await fetch("wikidata/logos.json");
 	return await f.json();
 }
 
-async function loadLineLogos(): Promise<Map<string, { src: string; color: Color; }>> {
+export async function loadLineLogos(): Promise<Map<string, { src: string; color: Color; }>> {
 	const logoAtlasRectangles = await fetchLogoAtlasRectangles();
 	const logoAtlas = await imagePromise("wikidata/logos.png");
 
@@ -45,7 +45,7 @@ async function loadLineLogos(): Promise<Map<string, { src: string; color: Color;
 	return out;
 }
 
-function imagePromise(src: string): Promise<HTMLImageElement> {
+export function imagePromise(src: string): Promise<HTMLImageElement> {
 	return new Promise((resolve, reject) => {
 		const img = document.createElement("img");
 		img.src = src;
@@ -54,7 +54,7 @@ function imagePromise(src: string): Promise<HTMLImageElement> {
 	});
 }
 
-async function getImageColor(image: HTMLImageElement): Promise<Color> {
+export async function getImageColor(image: HTMLImageElement): Promise<Color> {
 	const existing = imageColorCache[image.src];
 	if (existing) {
 		return existing;
@@ -114,7 +114,7 @@ async function getImageColor(image: HTMLImageElement): Promise<Color> {
 	}
 }
 
-function contrastingColor(color: Color): "#000" | "#FFF" {
+export function contrastingColor(color: Color): "#000" | "#FFF" {
 	const average = color.r * 0.21 + color.g + 0.72 + 0.07 * color.b;
 	if (average < 150) {
 		return "#FFF";
@@ -122,6 +122,6 @@ function contrastingColor(color: Color): "#000" | "#FFF" {
 	return "#000";
 }
 
-function toCSSColor(color: Color) {
+export function toCSSColor(color: Color) {
 	return `rgb(${Math.round(color.r)}, ${Math.round(color.g)}, ${Math.round(color.b)})`;
 }

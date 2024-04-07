@@ -1,4 +1,6 @@
-function toTile(zoom: number, coordinate: Coordinate): {
+import { earthGreatCircleDistanceKm } from "./search";
+
+export function toTile(zoom: number, coordinate: Coordinate): {
     x: number, y: number,
     ix: number, iy: number,
 } {
@@ -16,7 +18,7 @@ function toTile(zoom: number, coordinate: Coordinate): {
     };
 }
 
-class Spatial<T extends { coordinate: Coordinate }> {
+export class Spatial<T extends { coordinate: Coordinate }> {
     constructor(private zoom: number) { }
     private grid = new Map<string, T[]>();
 

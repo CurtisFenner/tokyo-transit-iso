@@ -4,85 +4,7 @@
         <meta charset="utf-8">
         <title>Dynamic Map Demo</title>
         <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-        crossorigin=""/>
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-        crossorigin=""></script>
-
-		<style>
-html {
-    font-size: 16px;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-}
-
-body {
-    padding: 0;
-    margin: 0;
-    height: 100vh;
-    overflow: hidden;
-    user-select: none;
-}
-
-.inline-box {
-    display: inline-block;
-}
-
-.center {
-    transform: translate(-50%, -50%);
-}
-
-.station {
-    border-radius: 0.5em;
-    border: 1px solid black;
-    padding: 0.25em;
-    margin: 0.25em 0.25em;
-    display: inline-block;
-}
-
-.train {
-    border-radius: 0.25em;
-    padding: 0.25em;
-    margin: 0.25em 0.25em;
-    background: #666;
-    color: white;
-    display: inline-block;
-}
-
-section {
-    background-color: rgba(255, 255, 255, 0.75);
-    backdrop-filter: blur(10px);
-    padding: 1.5rem;
-}
-
-section > *:first-child {
-    margin-top: 0;
-}
-
-.scroll-y {
-    overflow-y: scroll;
-}
-
-.inline-logo {
-    max-width: 2em;
-    max-height: 2em;
-    border-radius: 1px;
-    vertical-align: middle;
-}
-
-.panel {
-    user-select: text;
-    width: 35rem;
-}
-
-@media only screen and (max-width: 43rem) {
-    .panel {
-        width: calc(100vw - 3rem);
-    }
-}
-
-		</style>
+        <link rel="stylesheet" href="/style.css" />
     </head>
     <body>
         <div style="position: fixed; width: 100%; height: 100%;">
@@ -92,10 +14,6 @@ section > *:first-child {
             <h1>Routes from <ruby>渋谷<rt>しぶや</rt></ruby></h1>
             <i id="loading-message">Waiting for scripts...</i>
         </section>
-        <script src="compiled/spatial.js"></script>
-        <script src="compiled/images.js"></script>
-		<script src="compiled/matchstations.js"></script>
-        <script src="compiled/routes.js"></script>
-		<script src="compiled/search.js"></script>
+		<script type="module" src="/src/search.ts"></script>
     </body>
 </html>
