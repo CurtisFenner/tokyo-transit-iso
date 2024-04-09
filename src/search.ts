@@ -3,34 +3,9 @@ import * as images from "./images";
 import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
 import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
+import { LocalCoordinate, azimuthalNeighbor, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localDistortion, localPathIntersections, toGlobe, toLocalPlane } from "./geometry";
 
-function toSpherical(coordinate: Coordinate) {
-	const latRad = Math.PI * 2 * coordinate.lat / 360;
-	const lonRad = Math.PI * 2 * coordinate.lon / 360;
-	return {
-		x: Math.cos(lonRad) * Math.cos(latRad),
-		y: Math.sin(lonRad) * Math.cos(latRad),
-		z: Math.sin(latRad),
-	};
-}
 
-export const EARTH_RADIUS_KM = 6378.1;
-export function earthGreatCircleDistanceKm(a: Coordinate, b: Coordinate) {
-	const va = toSpherical(a);
-	const vb = toSpherical(b);
-	const dot = va.x * vb.x + va.y * vb.y + va.z * vb.z;
-	const angleRad = Math.acos(dot);
-	return angleRad * EARTH_RADIUS_KM;
-}
-
-export function azimuthalNeighbor(center: Coordinate, angle: number, radiusKm: number): Coordinate {
-	const latDegPerKm = 360 / (EARTH_RADIUS_KM * 2 * Math.PI);
-	const lonDegPerKm = latDegPerKm / Math.cos(center.lat * Math.PI / 180);
-	return {
-		lat: center.lat + radiusKm * latDegPerKm * Math.cos(angle),
-		lon: center.lon + radiusKm * lonDegPerKm * Math.sin(angle),
-	};
-}
 
 function toTimestamp(n: number) {
 	const minutes = (n % 60).toFixed(0).padStart(2, "0");
@@ -263,7 +238,13 @@ async function main() {
 	const pathingTrainPolyline = [];
 	const pathingWalkPolyline = [];
 
-	type Circle = { center: Coordinate, train: TrainLabel, radii: { timeMinutes: number, radiusKm: number }[] };
+	type Circle = {
+		coordinate: Coordinate,
+		train: TrainLabel,
+		radii: { timeMinutes: number, radiusKm: number }[],
+		arrivalMinutes: number,
+		id: number,
+	};
 	const circles: Circle[] = [];
 	const minuteIsos = [60];
 
@@ -288,7 +269,8 @@ async function main() {
 
 			if (parent?.via === "train") {
 				const circle = {
-					center: station.coordinate,
+					arrivalMinutes: reached.time,
+					coordinate: station.coordinate,
 					radii: minuteIsos.map(timeMinutes => {
 						const hoursAfterArrival = Math.max(0, timeMinutes - reached.time) / 60;
 						const radiusKm = Math.min(WALK_MAX_KM, hoursAfterArrival * STANDARD_WALKING_SPEED_KPH);
@@ -298,6 +280,7 @@ async function main() {
 						};
 					}),
 					train: parent.train.route[0],
+					id: reached.i,
 				};
 				circles.push(circle);
 			}
@@ -305,17 +288,78 @@ async function main() {
 	}
 
 	const areasByLine = new Map<number | null, Coordinate[][]>();
-	for (const circle of circles) {
+	const placedCircles = new spatial.Spatial<Circle>(12);
+	const allCircles = [];
+	for (const circle of circles.sort((a, b) => a.arrivalMinutes - b.arrivalMinutes)) {
 		const radius = circle.radii[circle.radii.length - 1];
 		if (radius.radiusKm <= 1e-3) {
 			continue;
 		}
 
-		const poly = [];
+		let contained = false;
+		for (const nearby of placedCircles.nearby(circle.coordinate, WALK_MAX_KM)) {
+			const nearbyRadiusKm = (circle.arrivalMinutes - nearby.arrivalMinutes) * STANDARD_WALKING_SPEED_KPH / 60;
+			const centerDistance = earthGreatCircleDistanceKm(nearby.coordinate, circle.coordinate);
+			if (centerDistance <= nearbyRadiusKm) {
+				contained = true;
+				break;
+			}
+		}
+		if (contained) {
+			continue;
+		}
+		placedCircles.add(circle);
+		allCircles.push(circle);
+	}
+
+	const allArcs = [];
+	for (const circle of allCircles) {
+		const radius = circle.radii[circle.radii.length - 1];
+
+		// Step by minute.
+		// Find intersections with neighbors.
+
+		const distort = localDistortion(circle.coordinate);
+
+		const restrictingArcs: LocalCoordinate[][] = [];
+		for (const neighbor of placedCircles.nearby(circle.coordinate, WALK_MAX_KM * 2)) {
+			const neighborRadius = neighbor.radii[circle.radii.length - 1].radiusKm;
+			const distance = earthGreatCircleDistanceKm(circle.coordinate, neighbor.coordinate);
+			if (distance >= radius.radiusKm + neighborRadius || neighbor.id === circle.id) {
+				continue;
+			}
+
+			const arc = growingHyperbolas(
+				{ coordinate: circle.coordinate, radiusKm: radius.radiusKm },
+				(STANDARD_WALKING_SPEED_KPH / 60) * -circle.arrivalMinutes,
+				{ coordinate: neighbor.coordinate, radiusKm: neighborRadius },
+				(STANDARD_WALKING_SPEED_KPH / 60) * -neighbor.arrivalMinutes,
+			);
+			if (arc !== null) {
+				restrictingArcs.push(arc.map(it => toLocalPlane(distort, it)));
+				allArcs.push(arc);
+			}
+		}
+
+		const poly: Coordinate[] = [];
 		const resolution = 36;
+		const localCenter = toLocalPlane(distort, circle.coordinate);
 		for (let k = 0; k <= resolution; k++) {
 			const angle = k / resolution * Math.PI * 2;
-			poly.push(azimuthalNeighbor(circle.center, angle, radius.radiusKm));
+			const edge: LocalCoordinate = {
+				xKm: localCenter.xKm + radius.radiusKm * Math.cos(angle),
+				yKm: localCenter.yKm + radius.radiusKm * Math.sin(angle),
+			};
+			const sweep = [localCenter, edge];
+			let closestIntersection = edge;
+			for (const arc of restrictingArcs) {
+				for (const intersection of localPathIntersections(arc, sweep)) {
+					if (localDistanceKm(closestIntersection, localCenter) > localDistanceKm(intersection, localCenter)) {
+						closestIntersection = intersection;
+					}
+				}
+			}
+			poly.push(toGlobe(distort, closestIntersection));
 		}
 
 		const key = circle.train.line;
@@ -350,30 +394,30 @@ async function main() {
 		});
 	}
 
-	map.addSource("train-polyline-s", {
-		type: "geojson",
-		data: {
-			type: "Feature",
-			geometry: {
-				type: "MultiLineString",
-				coordinates: pathingTrainPolyline.map(cs => cs.map(c => [c.lon, c.lat])),
-			},
-			properties: {},
-		},
-	});
-	map.addLayer({
-		id: "train-polyline",
-		type: "line",
-		source: "train-polyline-s",
-		layout: {
-			"line-cap": "round",
-			"line-join": "round",
-		},
-		paint: {
-			"line-color": "#ABC",
-			"line-width": 2,
-		},
-	});
+	// map.addSource("train-polyline-s", {
+	// 	type: "geojson",
+	// 	data: {
+	// 		type: "Feature",
+	// 		geometry: {
+	// 			type: "MultiLineString",
+	// 			coordinates: allArcs.map(cs => cs.map(c => [c.lon, c.lat])),
+	// 		},
+	// 		properties: {},
+	// 	},
+	// });
+	// map.addLayer({
+	// 	id: "train-polyline",
+	// 	type: "line",
+	// 	source: "train-polyline-s",
+	// 	layout: {
+	// 		"line-cap": "round",
+	// 		"line-join": "round",
+	// 	},
+	// 	paint: {
+	// 		"line-color": "#58A",
+	// 		"line-width": 2,
+	// 	},
+	// });
 }
 
 main();
