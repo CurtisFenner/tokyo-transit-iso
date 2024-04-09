@@ -73,6 +73,15 @@ function liesIn(a: number, range: [number, number], epsilon: number): boolean {
 	return (range[0] - epsilon <= a && a <= range[1] + epsilon) || (range[1] - epsilon <= a && a <= range[0] + epsilon);
 }
 
+export function liesOnSegmentBounding(
+	point: LocalCoordinate,
+	segment: LocalLine,
+	epsilon = 1e-2,
+) {
+	return liesIn(point.xKm, [segment.a.xKm, segment.b.xKm], epsilon)
+		&& liesIn(point.yKm, [segment.a.yKm, segment.b.yKm], epsilon);
+}
+
 export function localSegmentIntersection(u: LocalLine,
 	v: LocalLine,
 	epsilon = 1e-2,
@@ -82,8 +91,8 @@ export function localSegmentIntersection(u: LocalLine,
 		return null;
 	}
 
-	const onU = liesIn(intersection.xKm, [u.a.xKm, u.b.xKm], epsilon) && liesIn(intersection.yKm, [u.a.yKm, u.b.yKm], epsilon);
-	const onV = liesIn(intersection.xKm, [v.a.xKm, v.b.xKm], epsilon) && liesIn(intersection.yKm, [v.a.yKm, v.b.yKm], epsilon);
+	const onU = liesOnSegmentBounding(intersection, u, epsilon);
+	const onV = liesOnSegmentBounding(intersection, v, epsilon);
 	if (onU && onV) {
 		return intersection;
 	}
@@ -103,6 +112,39 @@ export function localPathIntersections(u: LocalCoordinate[], v: LocalCoordinate[
 		}
 	}
 
+	return out;
+}
+
+export function lineCircleIntersection(line: LocalLine, center: LocalCoordinate, radius: number): LocalCoordinate[] {
+	const dx = line.b.xKm - line.a.xKm;
+	const dy = line.b.yKm - line.a.yKm;
+	const drSquared = dx * dx + dy * dy;
+	const determinant = line.a.xKm * line.b.yKm - line.b.xKm * line.a.yKm;
+	const discriminant = radius * radius * drSquared - determinant * determinant;
+
+	if (discriminant < 0) return [];
+
+	const signDy = dy < 0 ? -1 : 1;
+	const sqrtDiscriminant = Math.sqrt(discriminant);
+
+	const intersectX1 = (determinant * dy + signDy * dx * sqrtDiscriminant) / drSquared + center.xKm;
+	const intersectY1 = (-determinant * dx + Math.abs(dy) * sqrtDiscriminant) / drSquared + center.yKm;
+
+	const intersectX2 = (determinant * dy - signDy * dx * sqrtDiscriminant) / drSquared + center.xKm;
+	const intersectY2 = (-determinant * dx - Math.abs(dy) * sqrtDiscriminant) / drSquared + center.yKm;
+
+	return [
+		{ xKm: intersectX1, yKm: intersectY1 },
+		{ xKm: intersectX2, yKm: intersectY2 },
+	];
+}
+
+export function pathCircleIntersection(path: LocalCoordinate[], center: LocalCoordinate, radius: number): LocalCoordinate[] {
+	const out: LocalCoordinate[] = [];
+	for (let i = 0; i + 1 < path.length; i++) {
+		const segment = { a: path[i], b: path[i + 1] };
+		out.push(...lineCircleIntersection(segment, center, radius));
+	}
 	return out;
 }
 
@@ -220,7 +262,7 @@ export function growingHyperbolas(
 		return null;
 	}
 
-	const resolution = 5;
+	const resolution = 4;
 	const left: Coordinate[] = [];
 	const right: Coordinate[] = [];
 

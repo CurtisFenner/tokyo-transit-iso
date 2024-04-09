@@ -3,7 +3,7 @@ import * as images from "./images";
 import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
 import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
-import { LocalCoordinate, azimuthalNeighbor, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localDistortion, localPathIntersections, toGlobe, toLocalPlane } from "./geometry";
+import { LocalCoordinate, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localDistortion, localPathIntersections, pathCircleIntersection, toGlobe, toLocalPlane } from "./geometry";
 
 
 
@@ -229,11 +229,14 @@ async function main() {
 
 	const SHIBUYA = matrices.stations.findIndex(x => x.name.includes("渋谷"))!;
 
-	loadingMessage.textContent = "";
 
 	const { table, parentEdges } = renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
 
+	loadingMessage.textContent = "Rendering map...";
+	await sleep(60);
+
 	document.getElementById("panel")!.appendChild(table);
+	await sleep(60);
 
 	const pathingTrainPolyline = [];
 	const pathingWalkPolyline = [];
@@ -341,11 +344,29 @@ async function main() {
 			}
 		}
 
-		const poly: Coordinate[] = [];
-		const resolution = 36;
 		const localCenter = toLocalPlane(distort, circle.coordinate);
-		for (let k = 0; k <= resolution; k++) {
-			const angle = k / resolution * Math.PI * 2;
+		const localEdgeAngles: { angle: number, required: boolean }[] = [];
+		const resolution = 12;
+		for (let k = 0; k < resolution; k++) {
+			const angle = k / resolution * Math.PI * 2 - Math.PI;
+			localEdgeAngles.push({ angle, required: true });
+		}
+
+		const otherPoints: LocalCoordinate[] = [];
+		for (let i = 0; i < restrictingArcs.length; i++) {
+			const arc = restrictingArcs[i];
+			otherPoints.push(...arc);
+			otherPoints.push(...pathCircleIntersection(arc, localCenter, radius.radiusKm));
+		}
+		for (const p of otherPoints) {
+			localEdgeAngles.push({
+				angle: Math.atan2(p.yKm - localCenter.yKm, p.xKm - localCenter.xKm),
+				required: false,
+			});
+		}
+
+		const poly: Coordinate[] = [];
+		for (const { angle, required } of localEdgeAngles.sort((a, b) => a.angle - b.angle)) {
 			const edge: LocalCoordinate = {
 				xKm: localCenter.xKm + radius.radiusKm * Math.cos(angle),
 				yKm: localCenter.yKm + radius.radiusKm * Math.sin(angle),
@@ -359,12 +380,15 @@ async function main() {
 					}
 				}
 			}
+			if (!required && closestIntersection === edge) {
+				continue;
+			}
 			poly.push(toGlobe(distort, closestIntersection));
 		}
 
 		const key = circle.train.line;
 		const polys = areasByLine.get(key) || [];
-		polys.push(poly);
+		polys.push([...poly, poly[0]]);
 		areasByLine.set(key, polys);
 	}
 
@@ -381,15 +405,16 @@ async function main() {
 				properties: {},
 			},
 		});
+		const lineColor = images.toCSSColor(matrixLineLogos[key || -1]?.color || { r: 0.5, g: 0.5, b: 0.5 });
 		map.addLayer({
 			id: "train-radius-" + String(key) + "-layer",
 			type: "fill",
 			source: sourceID,
 			layout: {},
 			paint: {
-				"fill-color": images.toCSSColor(matrixLineLogos[key || -1]?.color || { r: 0, g: 0, b: 0 }),
+				"fill-color": lineColor,
 				"fill-opacity": 0.5,
-				"fill-outline-color": "transparent",
+				"fill-outline-color": lineColor,
 			},
 		});
 	}
@@ -418,6 +443,8 @@ async function main() {
 	// 		"line-width": 2,
 	// 	},
 	// });
+
+	loadingMessage.textContent = "";
 }
 
 main();
