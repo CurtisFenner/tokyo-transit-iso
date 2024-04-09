@@ -67,3 +67,7 @@ section>*:first-child {
 		width: calc(100vw - 3rem);
 	}
 }
+
+.no-hover {
+	pointer-events: none;
+}

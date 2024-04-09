@@ -5,8 +5,6 @@ import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
 import { LocalCoordinate, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localDistortion, localPathIntersections, pathCircleIntersection, toGlobe, toLocalPlane } from "./geometry";
 
-
-
 function toTimestamp(n: number) {
 	const minutes = (n % 60).toFixed(0).padStart(2, "0");
 	const hours = Math.floor(n / 60).toFixed(0).padStart(2, "0");
@@ -406,8 +404,9 @@ async function main() {
 			},
 		});
 		const lineColor = images.toCSSColor(matrixLineLogos[key || -1]?.color || { r: 0.5, g: 0.5, b: 0.5 });
+		const layerID = "train-radius-" + String(key) + "-layer";
 		map.addLayer({
-			id: "train-radius-" + String(key) + "-layer",
+			id: layerID,
 			type: "fill",
 			source: sourceID,
 			layout: {},
@@ -417,7 +416,42 @@ async function main() {
 				"fill-outline-color": lineColor,
 			},
 		});
+
+		const popup = new maplibregl.Popup({
+			closeButton: false,
+			closeOnClick: false
+		});
+		map.on("mousemove", layerID, e => {
+			if (!e.features) {
+				return
+			}
+
+			const geometry = e.features[0].geometry;
+			const line = matrices.lines[key || -1];
+
+			const lines = document.createElement("div");
+			const jpLine = document.createElement("div");
+			jpLine.textContent = line?.name;
+			lines.appendChild(jpLine);
+			const wikiLine = wikidata.matchedLines.get(line);
+			if (wikiLine) {
+				if (wikiLine.line_en) {
+					const enLine = document.createElement("div");
+					enLine.textContent = wikiLine.line_en;
+					lines.appendChild(enLine);
+				}
+			}
+			popup.setLngLat(e.lngLat).setDOMContent(lines).addTo(map);
+			popup._container.classList.add("no-hover");
+		});
+
+		map.on("mouseleave", layerID, e => {
+			if (popup) {
+				popup.remove();
+			}
+		});
 	}
+
 
 	// map.addSource("train-polyline-s", {
 	// 	type: "geojson",
