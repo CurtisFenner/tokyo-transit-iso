@@ -3,7 +3,8 @@ import * as images from "./images";
 import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
 import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
-import { LocalCoordinate, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localDistortion, localPathIntersections, pathCircleIntersection, toGlobe, toLocalPlane } from "./geometry";
+import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localDistortion, localPathIntersections, pathCircleIntersection, toGlobe, toLocalPlane } from "./geometry";
+import { WalkingLocus, generateWalkingPolys } from "./poly";
 
 function toTimestamp(n: number) {
 	const minutes = (n % 60).toFixed(0).padStart(2, "0");
@@ -34,9 +35,6 @@ async function loadMatrices(): Promise<Matrices> {
 
 type StationOffset = number;
 
-const STANDARD_WALKING_SPEED_KPH = 4.5;
-const WALK_MAX_MIN = 30;
-const WALK_MAX_KM = WALK_MAX_MIN * STANDARD_WALKING_SPEED_KPH * 60;
 function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
 	let count = 0;
 
@@ -71,14 +69,13 @@ function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
 	return walkingTransfers;
 }
 
-function groupBy<K extends string, V>(seq: V[], f: (v: V) => K): Record<K, V[]> {
-	const out: Record<K, V[]> = {} as Record<K, V[]>;
+function groupBy<K, V>(seq: V[], f: (v: V) => K): Map<K, V[]> {
+	const out = new Map<K, V[]>();
 	for (const v of seq) {
 		const k = f(v);
-		if (!(k in out)) {
-			out[k] = [];
-		}
-		out[k].push(v);
+		const list = out.get(k) || [];
+		list.push(v);
+		out.set(k, list);
 	}
 	return out;
 }
@@ -230,23 +227,13 @@ async function main() {
 
 	const { table, parentEdges } = renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
 
-	loadingMessage.textContent = "Rendering map...";
-	await sleep(60);
-
 	document.getElementById("panel")!.appendChild(table);
 	await sleep(60);
 
 	const pathingTrainPolyline = [];
 	const pathingWalkPolyline = [];
 
-	type Circle = {
-		coordinate: Coordinate,
-		train: TrainLabel,
-		radii: { timeMinutes: number, radiusKm: number }[],
-		arrivalMinutes: number,
-		id: number,
-	};
-	const circles: Circle[] = [];
+	const circles: WalkingLocus[] = [];
 	const minuteIsos = [60];
 
 	for (const reached of parentEdges.filter(x => x && x.time < 60 * 3)) {
@@ -288,123 +275,31 @@ async function main() {
 		}
 	}
 
-	const areasByLine = new Map<number | null, Coordinate[][]>();
-	const placedCircles = new spatial.Spatial<Circle>(12);
-	const allCircles = [];
-	for (const circle of circles.sort((a, b) => a.arrivalMinutes - b.arrivalMinutes)) {
-		const radius = circle.radii[circle.radii.length - 1];
-		if (radius.radiusKm <= 1e-3) {
-			continue;
-		}
+	await sleep(60);
+	loadingMessage.textContent = "Rendering map...";
+	await sleep(60);
 
-		let contained = false;
-		for (const nearby of placedCircles.nearby(circle.coordinate, WALK_MAX_KM)) {
-			const nearbyRadiusKm = (circle.arrivalMinutes - nearby.arrivalMinutes) * STANDARD_WALKING_SPEED_KPH / 60;
-			const centerDistance = earthGreatCircleDistanceKm(nearby.coordinate, circle.coordinate);
-			if (centerDistance <= nearbyRadiusKm) {
-				contained = true;
-				break;
-			}
-		}
-		if (contained) {
-			continue;
-		}
-		placedCircles.add(circle);
-		allCircles.push(circle);
-	}
+	const stationWalkRegions = generateWalkingPolys(circles);
 
-	const allArcs = [];
-	for (const circle of allCircles) {
-		const radius = circle.radii[circle.radii.length - 1];
+	const regionsByLine = groupBy(stationWalkRegions, x => x.locus.train.line);
 
-		// Step by minute.
-		// Find intersections with neighbors.
-
-		const distort = localDistortion(circle.coordinate);
-
-		const restrictingArcs: LocalCoordinate[][] = [];
-		for (const neighbor of placedCircles.nearby(circle.coordinate, WALK_MAX_KM * 2)) {
-			const neighborRadius = neighbor.radii[circle.radii.length - 1].radiusKm;
-			const distance = earthGreatCircleDistanceKm(circle.coordinate, neighbor.coordinate);
-			if (distance >= radius.radiusKm + neighborRadius || neighbor.id === circle.id) {
-				continue;
-			}
-
-			const arc = growingHyperbolas(
-				{ coordinate: circle.coordinate, radiusKm: radius.radiusKm },
-				(STANDARD_WALKING_SPEED_KPH / 60) * -circle.arrivalMinutes,
-				{ coordinate: neighbor.coordinate, radiusKm: neighborRadius },
-				(STANDARD_WALKING_SPEED_KPH / 60) * -neighbor.arrivalMinutes,
-			);
-			if (arc !== null) {
-				restrictingArcs.push(arc.map(it => toLocalPlane(distort, it)));
-				allArcs.push(arc);
-			}
-		}
-
-		const localCenter = toLocalPlane(distort, circle.coordinate);
-		const localEdgeAngles: { angle: number, required: boolean }[] = [];
-		const resolution = 12;
-		for (let k = 0; k < resolution; k++) {
-			const angle = k / resolution * Math.PI * 2 - Math.PI;
-			localEdgeAngles.push({ angle, required: true });
-		}
-
-		const otherPoints: LocalCoordinate[] = [];
-		for (let i = 0; i < restrictingArcs.length; i++) {
-			const arc = restrictingArcs[i];
-			otherPoints.push(...arc);
-			otherPoints.push(...pathCircleIntersection(arc, localCenter, radius.radiusKm));
-		}
-		for (const p of otherPoints) {
-			localEdgeAngles.push({
-				angle: Math.atan2(p.yKm - localCenter.yKm, p.xKm - localCenter.xKm),
-				required: false,
-			});
-		}
-
-		const poly: Coordinate[] = [];
-		for (const { angle, required } of localEdgeAngles.sort((a, b) => a.angle - b.angle)) {
-			const edge: LocalCoordinate = {
-				xKm: localCenter.xKm + radius.radiusKm * Math.cos(angle),
-				yKm: localCenter.yKm + radius.radiusKm * Math.sin(angle),
-			};
-			const sweep = [localCenter, edge];
-			let closestIntersection = edge;
-			for (const arc of restrictingArcs) {
-				for (const intersection of localPathIntersections(arc, sweep)) {
-					if (localDistanceKm(closestIntersection, localCenter) > localDistanceKm(intersection, localCenter)) {
-						closestIntersection = intersection;
-					}
-				}
-			}
-			if (!required && closestIntersection === edge) {
-				continue;
-			}
-			poly.push(toGlobe(distort, closestIntersection));
-		}
-
-		const key = circle.train.line;
-		const polys = areasByLine.get(key) || [];
-		polys.push([...poly, poly[0]]);
-		areasByLine.set(key, polys);
-	}
-
-	for (const [key, polys] of areasByLine) {
-		const sourceID = "train-radius-" + String(key);
+	for (const [lineID, polys] of regionsByLine) {
+		const sourceID = "train-radius-" + String(lineID);
 		map.addSource(sourceID, {
 			type: "geojson",
 			data: {
 				type: "Feature",
 				geometry: {
 					type: "MultiPolygon",
-					coordinates: polys.map(poly => [poly.map<[number, number]>(c => [c.lon, c.lat])]),
+					coordinates: polys
+						.map(poly => [...poly.poly, poly.poly[0]])
+						.map(poly => [poly.map<[number, number]>(c => [c.lon, c.lat])]),
 				},
 				properties: {},
 			},
 		});
-		const lineColor = images.toCSSColor(matrixLineLogos[key || -1]?.color || { r: 0.5, g: 0.5, b: 0.5 });
-		const layerID = "train-radius-" + String(key) + "-layer";
+		const lineColor = images.toCSSColor(matrixLineLogos[lineID || -1]?.color || { r: 0.5, g: 0.5, b: 0.5 });
+		const layerID = "train-radius-" + String(lineID) + "-layer";
 		map.addLayer({
 			id: layerID,
 			type: "fill",
@@ -427,7 +322,7 @@ async function main() {
 			}
 
 			const geometry = e.features[0].geometry;
-			const line = matrices.lines[key || -1];
+			const line = matrices.lines[lineID || -1];
 
 			const lines = document.createElement("div");
 			const jpLine = document.createElement("div");
@@ -452,7 +347,6 @@ async function main() {
 		});
 	}
 
-
 	// map.addSource("train-polyline-s", {
 	// 	type: "geojson",
 	// 	data: {
@@ -474,7 +368,7 @@ async function main() {
 	// 	},
 	// 	paint: {
 	// 		"line-color": "#58A",
-	// 		"line-width": 2,
+	// 		"line-width": 1,
 	// 	},
 	// });
 
