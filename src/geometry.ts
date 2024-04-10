@@ -21,6 +21,9 @@ export function earthGreatCircleDistanceKm(a: Coordinate, b: Coordinate) {
 	return angleRad * EARTH_RADIUS_KM;
 }
 
+export type LocalCoordinate = { xKm: number, yKm: number };
+export type LocalLine = { a: LocalCoordinate, b: LocalCoordinate };
+
 export class LocalPlane {
 	private constructor(
 		private readonly lonDegPerKm: number,
@@ -46,6 +49,31 @@ export class LocalPlane {
 			lat: local.yKm * this.latDegPerKm,
 		};
 	}
+
+	subtract(a: LocalCoordinate, b: LocalCoordinate): LocalCoordinate {
+		return {
+			xKm: a.xKm - b.xKm,
+			yKm: a.yKm - b.yKm,
+		};
+	}
+
+	add(a: LocalCoordinate, b: LocalCoordinate): LocalCoordinate {
+		return {
+			xKm: a.xKm + b.xKm,
+			yKm: a.yKm + b.yKm,
+		};
+	}
+
+	angleOf(v: LocalCoordinate): number {
+		return Math.atan2(v.yKm, v.xKm);
+	}
+
+	polar(radiusKm: number, angle: number) {
+		return {
+			xKm: radiusKm * Math.cos(angle),
+			yKm: radiusKm * Math.sin(angle),
+		};
+	}
 }
 
 export type GeoCircle = {
@@ -59,9 +87,6 @@ export function geoMidpoint(a: Coordinate, b: Coordinate) {
 		lon: (a.lon + b.lon) / 2,
 	};
 }
-
-export type LocalCoordinate = { xKm: number, yKm: number };
-export type LocalLine = { a: LocalCoordinate, b: LocalCoordinate };
 
 export function localLineIntersection(u: LocalLine, v: LocalLine): LocalCoordinate | null {
 	const udx = u.a.xKm - u.b.xKm;

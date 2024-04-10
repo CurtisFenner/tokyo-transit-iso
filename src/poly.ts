@@ -79,7 +79,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 		}
 		for (const p of otherPoints) {
 			localEdgeAngles.push({
-				angle: Math.atan2(p.yKm - localCenter.yKm, p.xKm - localCenter.xKm),
+				angle: distort.angleOf(distort.subtract(p, localCenter)),
 				required: false,
 			});
 		}
@@ -87,10 +87,10 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 		const poly: Coordinate[] = [];
 		const orthoRadius = radius.radiusKm / Math.cos((Math.PI * 2 / resolution) / 2);
 		for (const { angle, required } of localEdgeAngles.sort((a, b) => a.angle - b.angle)) {
-			const edge: LocalCoordinate = {
-				xKm: localCenter.xKm + orthoRadius * Math.cos(angle),
-				yKm: localCenter.yKm + orthoRadius * Math.sin(angle),
-			};
+			const edge: LocalCoordinate = distort.add(
+				localCenter,
+				distort.polar(orthoRadius, angle)
+			);
 			const sweep = [localCenter, edge];
 			let closestIntersection = edge;
 			for (const arc of restrictingArcs) {
