@@ -1,4 +1,4 @@
-import { LocalCoordinate, LocalPlane, STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localPathIntersections, pathCircleIntersection } from "./geometry";
+import { LocalCoordinate, LocalPlane, STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, earthGreatCircleDistanceKm, growingHyperbolas, pathCircleIntersection } from "./geometry";
 import * as spatial from "./spatial";
 
 export type WalkingLocus = {
@@ -75,7 +75,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 		for (let i = 0; i < restrictingArcs.length; i++) {
 			const arc = restrictingArcs[i];
 			otherPoints.push(...arc);
-			otherPoints.push(...pathCircleIntersection(arc, localCenter, radius.radiusKm));
+			otherPoints.push(...pathCircleIntersection(distort, arc, localCenter, radius.radiusKm));
 		}
 		for (const p of otherPoints) {
 			localEdgeAngles.push({
@@ -94,8 +94,8 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 			const sweep = [localCenter, edge];
 			let closestIntersection = edge;
 			for (const arc of restrictingArcs) {
-				for (const intersection of localPathIntersections(arc, sweep)) {
-					if (localDistanceKm(closestIntersection, localCenter) > localDistanceKm(intersection, localCenter)) {
+				for (const intersection of distort.pathIntersections(arc, sweep)) {
+					if (distort.distanceKm(closestIntersection, localCenter) > distort.distanceKm(intersection, localCenter)) {
 						closestIntersection = intersection;
 					}
 				}
