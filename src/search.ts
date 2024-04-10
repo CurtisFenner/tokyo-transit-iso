@@ -3,7 +3,7 @@ import * as images from "./images";
 import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
 import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
-import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localDistortion, localPathIntersections, pathCircleIntersection, toGlobe, toLocalPlane } from "./geometry";
+import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircleDistanceKm } from "./geometry";
 import { WalkingLocus, generateWalkingPolys } from "./poly";
 
 function toTimestamp(n: number) {
@@ -18,7 +18,6 @@ const map = new maplibregl.Map({
 	center: [HACHIKO_COORDINATES.lon, HACHIKO_COORDINATES.lat],
 	zoom: 9
 });
-
 
 async function loadMatrices(): Promise<Matrices> {
 	const fet = fetch("generated/morning-matrix.json.gze");

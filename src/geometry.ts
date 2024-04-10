@@ -21,20 +21,31 @@ export function earthGreatCircleDistanceKm(a: Coordinate, b: Coordinate) {
 	return angleRad * EARTH_RADIUS_KM;
 }
 
-export type Distortion = { lonDegPerKm: number, latDegPerKm: number };
+export class LocalPlane {
+	private constructor(
+		private readonly lonDegPerKm: number,
+		private readonly latDegPerKm: number,
+	) { }
 
-export function localDistortion(coordinate: Coordinate): Distortion {
-	const latDegPerKm = 360 / (EARTH_RADIUS_KM * 2 * Math.PI);
-	const lonDegPerKm = latDegPerKm / Math.cos(coordinate.lat * Math.PI / 180);
-	return { latDegPerKm, lonDegPerKm };
-}
+	static nearPoint(coordinate: Coordinate): LocalPlane {
+		const latDegPerKm = 360 / (EARTH_RADIUS_KM * 2 * Math.PI);
+		const lonDegPerKm = latDegPerKm / Math.cos(coordinate.lat * Math.PI / 180);
+		return new LocalPlane(lonDegPerKm, latDegPerKm);
+	}
 
-export function azimuthalNeighbor(center: Coordinate, angle: number, radiusKm: number): Coordinate {
-	const distortion = localDistortion(center);
-	return {
-		lat: center.lat + radiusKm * distortion.latDegPerKm * Math.cos(angle),
-		lon: center.lon + radiusKm * distortion.lonDegPerKm * Math.sin(angle),
-	};
+	toLocal(coordinate: Coordinate): LocalCoordinate {
+		return {
+			xKm: coordinate.lon / this.lonDegPerKm,
+			yKm: coordinate.lat / this.latDegPerKm,
+		};
+	}
+
+	toGlobe(local: LocalCoordinate): Coordinate {
+		return {
+			lon: local.xKm * this.lonDegPerKm,
+			lat: local.yKm * this.latDegPerKm,
+		};
+	}
 }
 
 export type GeoCircle = {
@@ -170,20 +181,6 @@ export function pathCircleIntersection(path: LocalCoordinate[], center: LocalCoo
 	}
 }
 
-export function toLocalPlane(distortion: Distortion, point: Coordinate): LocalCoordinate {
-	return {
-		xKm: point.lon / distortion.lonDegPerKm,
-		yKm: point.lat / distortion.latDegPerKm,
-	};
-}
-
-export function toGlobe(distortion: Distortion, local: LocalCoordinate): Coordinate {
-	return {
-		lon: local.xKm * distortion.lonDegPerKm,
-		lat: local.yKm * distortion.latDegPerKm,
-	};
-}
-
 export function localDistanceKm(a: LocalCoordinate, b: LocalCoordinate) {
 	const dx = a.xKm - b.xKm;
 	const dy = a.yKm - b.yKm;
@@ -191,14 +188,14 @@ export function localDistanceKm(a: LocalCoordinate, b: LocalCoordinate) {
 }
 
 export function geocircleIntersections(a: GeoCircle, b: GeoCircle): Coordinate[] {
-	const distortion = localDistortion(geoMidpoint(a.coordinate, b.coordinate));
+	const distortion = LocalPlane.nearPoint(geoMidpoint(a.coordinate, b.coordinate));
 
 	const distanceKm = earthGreatCircleDistanceKm(a.coordinate, b.coordinate);
 	if (distanceKm > a.radiusKm + b.radiusKm || distanceKm < 1e-5) {
 		return [];
 	}
-	const localA = toLocalPlane(distortion, a.coordinate);
-	const localB = toLocalPlane(distortion, b.coordinate);
+	const localA = distortion.toLocal(a.coordinate);
+	const localB = distortion.toLocal(b.coordinate);
 	const d = localDistanceKm(localA, localB);
 	if (d >= a.radiusKm + b.radiusKm || d < 1e-5) {
 		return [];
@@ -222,8 +219,8 @@ export function geocircleIntersections(a: GeoCircle, b: GeoCircle): Coordinate[]
 	};
 
 	return [
-		toGlobe(distortion, localLeft),
-		toGlobe(distortion, localRight),
+		distortion.toGlobe(localLeft),
+		distortion.toGlobe(localRight),
 	];
 }
 
@@ -236,14 +233,14 @@ export function growingHyperbolas(
 	if (aInitialKm > 0) throw Error();
 	if (bInitialKm > 0) throw Error();
 
-	const distortion = localDistortion(geoMidpoint(a.coordinate, b.coordinate));
+	const distortion = LocalPlane.nearPoint(geoMidpoint(a.coordinate, b.coordinate));
 
 	const geodesicDistanceKm = earthGreatCircleDistanceKm(a.coordinate, b.coordinate);
 	if (geodesicDistanceKm > a.radiusKm + b.radiusKm || geodesicDistanceKm < 1e-5) {
 		return null;
 	}
-	const localA = toLocalPlane(distortion, a.coordinate);
-	const localB = toLocalPlane(distortion, b.coordinate);
+	const localA = distortion.toLocal(a.coordinate);
+	const localB = distortion.toLocal(b.coordinate);
 
 	const localDistance = Math.sqrt(
 		(localA.xKm - localB.xKm) ** 2 + (localA.yKm - localB.yKm) ** 2
@@ -278,7 +275,7 @@ export function growingHyperbolas(
 		xKm: localA.xKm + (aInitialKm + startTime) * localDirection.xKm,
 		yKm: localA.yKm + (aInitialKm + startTime) * localDirection.yKm,
 	};
-	const kiss = toGlobe(distortion, localKiss);
+	const kiss = distortion.toGlobe(localKiss);
 
 	for (let i = 1; i <= resolution + 1; i++) {
 		const time = startTime + (endTime - startTime) * i / resolution;

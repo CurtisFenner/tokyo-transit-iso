@@ -1,4 +1,4 @@
-import { LocalCoordinate, STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localDistortion, localPathIntersections, pathCircleIntersection, toGlobe, toLocalPlane } from "./geometry";
+import { LocalCoordinate, LocalPlane, STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, earthGreatCircleDistanceKm, growingHyperbolas, localDistanceKm, localPathIntersections, pathCircleIntersection } from "./geometry";
 import * as spatial from "./spatial";
 
 export type WalkingLocus = {
@@ -42,7 +42,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 		// Step by minute.
 		// Find intersections with neighbors.
 
-		const distort = localDistortion(circle.coordinate);
+		const distort = LocalPlane.nearPoint(circle.coordinate);
 
 		const restrictingArcs: LocalCoordinate[][] = [];
 		for (const neighbor of placedCircles.nearby(circle.coordinate, WALK_MAX_KM * 2)) {
@@ -59,11 +59,11 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 				(STANDARD_WALKING_SPEED_KPH / 60) * -neighbor.arrivalMinutes,
 			);
 			if (arc !== null) {
-				restrictingArcs.push(arc.map(it => toLocalPlane(distort, it)));
+				restrictingArcs.push(arc.map(it => distort.toLocal(it)));
 			}
 		}
 
-		const localCenter = toLocalPlane(distort, circle.coordinate);
+		const localCenter = distort.toLocal(circle.coordinate);
 		const localEdgeAngles: { angle: number, required: boolean }[] = [];
 		const resolution = 12;
 		for (let k = 0; k < resolution; k++) {
@@ -103,7 +103,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 			if (!required && closestIntersection === edge) {
 				continue;
 			}
-			poly.push(toGlobe(distort, closestIntersection));
+			poly.push(distort.toGlobe(closestIntersection));
 		}
 
 		polys.push({ locus: circle, poly });
