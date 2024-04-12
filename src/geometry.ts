@@ -21,92 +21,128 @@ export function earthGreatCircleDistanceKm(a: Coordinate, b: Coordinate) {
 	return angleRad * EARTH_RADIUS_KM;
 }
 
-export type LocalCoordinate = { xKm: number, yKm: number };
+// export type LocalCoordinate = { xKm: number, yKm: number };
+export type LocalCoordinate = number & { __brand: "PackedLocal" };
 export type LocalLine = { a: LocalCoordinate, b: LocalCoordinate };
+
+const KM_PER_INT = 1e-4;
+const PACK_HIGH = 2 ** 12;
+function packLocalComponent(x: number): number {
+	const p = (x + PACK_HIGH) / (PACK_HIGH * 2);
+	const i = Math.round(p * 2 ** 24);
+	return i;
+}
+function packLocal(x: number, y: number): LocalCoordinate {
+	const ix = packLocalComponent(x);
+	const iy = packLocalComponent(y);
+	return (ix * (2 ** 24)) + iy as LocalCoordinate;
+}
+
+function unpackLocalXkm(v: LocalCoordinate): number {
+	const ix = Math.floor(v / (2 ** 24));
+	return (ix / (2 ** 24)) * PACK_HIGH * 2 - PACK_HIGH;
+}
+
+function unpackLocalYkm(v: LocalCoordinate): number {
+	const iy = v % (2 ** 24);
+	return (iy / (2 ** 24)) * PACK_HIGH * 2 - PACK_HIGH;
+}
 
 export class LocalPlane {
 	private constructor(
 		private readonly lonDegPerKm: number,
 		private readonly latDegPerKm: number,
+		private readonly origin: Coordinate,
 	) { }
 
 	static nearPoint(coordinate: Coordinate): LocalPlane {
 		const latDegPerKm = 360 / (EARTH_RADIUS_KM * 2 * Math.PI);
 		const lonDegPerKm = latDegPerKm / Math.cos(coordinate.lat * Math.PI / 180);
-		return new LocalPlane(lonDegPerKm, latDegPerKm);
+		return new LocalPlane(lonDegPerKm, latDegPerKm, coordinate);
 	}
 
 	toLocal(coordinate: Coordinate): LocalCoordinate {
-		return {
-			xKm: coordinate.lon / this.lonDegPerKm,
-			yKm: coordinate.lat / this.latDegPerKm,
-		};
+		return packLocal(
+			(coordinate.lon - this.origin.lon) / this.lonDegPerKm,
+			(coordinate.lat - this.origin.lat) / this.latDegPerKm,
+		);
 	}
 
 	toGlobe(local: LocalCoordinate): Coordinate {
+		const xKm = unpackLocalXkm(local);
+		const yKm = unpackLocalYkm(local);
 		return {
-			lon: local.xKm * this.lonDegPerKm,
-			lat: local.yKm * this.latDegPerKm,
+			lon: xKm * this.lonDegPerKm + this.origin.lon,
+			lat: yKm * this.latDegPerKm + this.origin.lat,
 		};
 	}
 
 	subtract(a: LocalCoordinate, b: LocalCoordinate): LocalCoordinate {
-		return {
-			xKm: a.xKm - b.xKm,
-			yKm: a.yKm - b.yKm,
-		};
+		// Assumes no overflow
+		return a - b as LocalCoordinate;
 	}
 
 	add(a: LocalCoordinate, b: LocalCoordinate): LocalCoordinate {
-		return {
-			xKm: a.xKm + b.xKm,
-			yKm: a.yKm + b.yKm,
-		};
+		// Assumes no overflow
+		return a + b as LocalCoordinate;
 	}
 
 	angleOf(v: LocalCoordinate): number {
-		return Math.atan2(v.yKm, v.xKm);
+		const xKm = unpackLocalXkm(v);
+		const yKm = unpackLocalYkm(v);
+		return Math.atan2(yKm, xKm);
 	}
 
-	polar(radiusKm: number, angle: number) {
-		return {
-			xKm: radiusKm * Math.cos(angle),
-			yKm: radiusKm * Math.sin(angle),
-		};
+	polar(radiusKm: number, angle: number): LocalCoordinate {
+		return packLocal(
+			radiusKm * Math.cos(angle),
+			radiusKm * Math.sin(angle),
+		);
 	}
 
 	distanceKm(a: LocalCoordinate, b: LocalCoordinate) {
-		const dx = a.xKm - b.xKm;
-		const dy = a.yKm - b.yKm;
+		const delta = a - b as LocalCoordinate;
+		const dx = unpackLocalXkm(delta);
+		const dy = unpackLocalYkm(delta);
 		return Math.sqrt(dx ** 2 + dy ** 2);
 	}
 
 	directionTo(a: LocalCoordinate, b: LocalCoordinate): LocalCoordinate {
 		const length = this.distanceKm(a, b);
-		return {
-			xKm: (b.xKm - a.xKm) / length,
-			yKm: (b.yKm - a.yKm) / length,
-		};
+		const delta = a - b as LocalCoordinate;
+		const dx = unpackLocalXkm(delta) / length;
+		const dy = unpackLocalYkm(delta) / length;
+		return packLocal(dx, dy);
 	}
 
 	lineIntersection(u: LocalLine, v: LocalLine): LocalCoordinate | null {
-		const udx = u.a.xKm - u.b.xKm;
-		const udy = u.a.yKm - u.b.yKm;
-		const vdx = v.a.xKm - v.b.xKm;
-		const vdy = v.a.yKm - v.b.yKm;
+		const uax = unpackLocalXkm(u.a);
+		const uay = unpackLocalYkm(u.a);
+		const ubx = unpackLocalXkm(u.b);
+		const uby = unpackLocalYkm(u.b);
+
+		const vax = unpackLocalXkm(v.a);
+		const vay = unpackLocalYkm(v.a);
+		const vbx = unpackLocalXkm(v.b);
+		const vby = unpackLocalYkm(v.b);
+
+		const udx = uax - ubx;
+		const udy = uay - uby;
+		const vdx = vax - vbx;
+		const vdy = vay - vby;
 
 		const denominator = udx * vdy - udy * vdx;
 		if (denominator === 0) {
 			return null;
 		}
 
-		const cross1 = u.a.xKm * u.b.yKm - u.a.yKm * u.b.xKm;
-		const cross2 = v.a.xKm * v.b.yKm - v.a.yKm * v.b.xKm;
+		const cross1 = uax * uby - uay * ubx;
+		const cross2 = vax * vby - vay * vbx;
 
 		const intersectX = (cross1 * vdx - udx * cross2) / denominator;
 		const intersectY = (cross1 * vdy - udy * cross2) / denominator;
 
-		return { xKm: intersectX, yKm: intersectY };
+		return packLocal(intersectX, intersectY);
 	}
 
 	segmentIntersection(
@@ -148,18 +184,31 @@ export class LocalPlane {
 		segment: LocalLine,
 		epsilon = 1e-2,
 	) {
-		const lowX = Math.min(segment.a.xKm, segment.b.xKm) - epsilon;
-		const highX = Math.max(segment.a.xKm, segment.b.xKm) + epsilon;
-		const lowY = Math.min(segment.a.yKm, segment.b.yKm) - epsilon;
-		const highY = Math.max(segment.a.yKm, segment.b.yKm) + epsilon;
-		return lowX <= point.xKm && point.xKm <= highX && lowY <= point.yKm && point.yKm <= highY;
+		const ax = unpackLocalXkm(segment.a);
+		const ay = unpackLocalYkm(segment.a);
+		const bx = unpackLocalXkm(segment.b);
+		const by = unpackLocalYkm(segment.b);
+		const lowX = Math.min(ax, bx) - epsilon;
+		const highX = Math.max(ax, bx) + epsilon;
+		const lowY = Math.min(ay, by) - epsilon;
+		const highY = Math.max(ay, by) + epsilon;
+
+		const x = unpackLocalXkm(point);
+		const y = unpackLocalYkm(point);
+		return lowX <= x && x <= highX && lowY <= y && y <= highY;
 	}
 
 	lineCircleIntersection(line: LocalLine, center: LocalCoordinate, radius: number): LocalCoordinate[] {
-		const dx = line.b.xKm - line.a.xKm;
-		const dy = line.b.yKm - line.a.yKm;
+		const delta = line.b - line.a as LocalCoordinate;
+		const ax = unpackLocalXkm(line.a);
+		const ay = unpackLocalYkm(line.a);
+		const bx = unpackLocalXkm(line.b);
+		const by = unpackLocalYkm(line.b);
+
+		const dx = unpackLocalXkm(delta);
+		const dy = unpackLocalYkm(delta);
 		const drSquared = dx * dx + dy * dy;
-		const determinant = line.a.xKm * line.b.yKm - line.b.xKm * line.a.yKm;
+		const determinant = ax * by - bx * ay;
 		const discriminant = radius * radius * drSquared - determinant * determinant;
 
 		if (discriminant < 0) return [];
@@ -167,15 +216,15 @@ export class LocalPlane {
 		const signDy = dy < 0 ? -1 : 1;
 		const sqrtDiscriminant = Math.sqrt(discriminant);
 
-		const intersectX1 = (determinant * dy + signDy * dx * sqrtDiscriminant) / drSquared + center.xKm;
-		const intersectY1 = (-determinant * dx + Math.abs(dy) * sqrtDiscriminant) / drSquared + center.yKm;
+		const intersectX1 = (determinant * dy + signDy * dx * sqrtDiscriminant) / drSquared;
+		const intersectY1 = (-determinant * dx + Math.abs(dy) * sqrtDiscriminant) / drSquared;
 
-		const intersectX2 = (determinant * dy - signDy * dx * sqrtDiscriminant) / drSquared + center.xKm;
-		const intersectY2 = (-determinant * dx - Math.abs(dy) * sqrtDiscriminant) / drSquared + center.yKm;
+		const intersectX2 = (determinant * dy - signDy * dx * sqrtDiscriminant) / drSquared;
+		const intersectY2 = (-determinant * dx - Math.abs(dy) * sqrtDiscriminant) / drSquared;
 
 		return [
-			{ xKm: intersectX1, yKm: intersectY1 },
-			{ xKm: intersectX2, yKm: intersectY2 },
+			packLocal(intersectX1, intersectY1) + center as LocalCoordinate,
+			packLocal(intersectX2, intersectY2) + center as LocalCoordinate,
 		];
 	}
 }
@@ -201,25 +250,33 @@ export function pathCircleIntersection(plane: LocalPlane, path: LocalCoordinate[
 	return out;
 }
 
+function assertIsNear(actual: number, expected: number, message = "", epsilon = 1e-3): number {
+	if (Math.abs(actual - expected) < epsilon) {
+		return actual;
+	} else {
+		throw new Error(`expected ${message ? message + " " : ""}${actual} to be within ${epsilon} of ${expected}`);
+	}
+}
+
 {
 	const lineU: LocalLine = {
-		a: { xKm: 13, yKm: 8 * 13 - 7 },
-		b: { xKm: 17, yKm: 8 * 17 - 7 },
+		a: packLocal(13, 8 * 13 - 7),
+		b: packLocal(17, 8 * 17 - 7),
 	};
+	assertIsNear(unpackLocalXkm(lineU.a), 13, "a.x");
+	assertIsNear(unpackLocalYkm(lineU.a), 8 * 13 - 7, "a.y");
+
 	const lineV: LocalLine = {
-		a: { xKm: 31, yKm: -3 * 31 + 5 },
-		b: { xKm: 37, yKm: -3 * 37 + 5 },
+		a: packLocal(31, -3 * 31 + 5),
+		b: packLocal(37, -3 * 37 + 5),
 	};
 
 	const plane = LocalPlane.nearPoint({ lat: 0, lon: 0 });
 
 	const actual = plane.lineIntersection(lineU, lineV);
 	if (!actual) throw new Error("expected localLineIntersection to return");
-	if (Math.abs(actual.xKm - 12 / 11) >= 1e-5) {
-		throw new Error("wrong xKm");
-	} else if (Math.abs(actual.yKm - 19 / 11) >= 1e-5) {
-		throw new Error("wrong yKm");
-	}
+	assertIsNear(unpackLocalXkm(actual), 12 / 11, "line-line-intersection.x");
+	assertIsNear(unpackLocalYkm(actual), 19 / 11, "line-line-intersection.y");
 }
 
 export function geocircleIntersections(a: GeoCircle, b: GeoCircle): Coordinate[] {
@@ -240,19 +297,21 @@ export function geocircleIntersections(a: GeoCircle, b: GeoCircle): Coordinate[]
 	const ortho = Math.sqrt(a.radiusKm ** 2 - parallel ** 2);
 
 	const direction = distortion.directionTo(localA, localB);
+	const dx = unpackLocalXkm(direction);
+	const dy = unpackLocalYkm(direction);
 
-	const localLeft = {
-		xKm: localA.xKm + direction.xKm * parallel - direction.yKm * ortho,
-		yKm: localA.yKm + direction.yKm * parallel + direction.xKm * ortho,
-	};
-	const localRight = {
-		xKm: localA.xKm + direction.xKm * parallel + direction.yKm * ortho,
-		yKm: localA.yKm + direction.yKm * parallel - direction.xKm * ortho,
-	};
+	const localLeft = packLocal(
+		dx * parallel - dy * ortho,
+		dy * parallel + dx * ortho,
+	);
+	const localRight = packLocal(
+		dx * parallel + dy * ortho,
+		dy * parallel - dx * ortho,
+	);
 
 	return [
-		distortion.toGlobe(localLeft),
-		distortion.toGlobe(localRight),
+		distortion.toGlobe(localA + localLeft as LocalCoordinate),
+		distortion.toGlobe(localA + localRight as LocalCoordinate),
 	];
 }
 
@@ -298,10 +357,10 @@ export function growingHyperbolas(
 
 	const localDirection: LocalCoordinate = distortion.directionTo(localA, localB);
 
-	const localKiss: LocalCoordinate = {
-		xKm: localA.xKm + (aInitialKm + startTime) * localDirection.xKm,
-		yKm: localA.yKm + (aInitialKm + startTime) * localDirection.yKm,
-	};
+	const localKiss: LocalCoordinate = localA + packLocal(
+		(aInitialKm + startTime) * unpackLocalXkm(localDirection),
+		(aInitialKm + startTime) * unpackLocalYkm(localDirection),
+	) as LocalCoordinate;
 	const kiss = distortion.toGlobe(localKiss);
 
 	for (let i = 1; i <= resolution + 1; i++) {

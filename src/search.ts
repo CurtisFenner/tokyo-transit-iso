@@ -278,7 +278,22 @@ async function main() {
 	loadingMessage.textContent = "Rendering map...";
 	await sleep(60);
 
+	// COLD: 7987 ms, 8836 ms, 8169 ms, 8108 ms
+	const beforeRegions = performance.now();
 	const stationWalkRegions = generateWalkingPolys(circles);
+	const afterRegions = performance.now();
+	console.log(Math.floor(afterRegions - beforeRegions), "ms regions");
+
+	// WARM: 5039 ms, 4955 ms, 4983 ms / 4788 ms, 4772 ms, 4854 ms
+	// 4834 ms, 4827 ms, 4860 ms.
+	for (let k = 0; k < 0; k++) {
+		const beforeRegions = performance.now();
+		generateWalkingPolys(circles);
+		const afterRegions = performance.now();
+		console.log(Math.floor(afterRegions - beforeRegions), "ms WARM regions");
+	}
+
+	console.log(stationWalkRegions);
 
 	const regionsByLine = groupBy(stationWalkRegions, x => x.locus.train.line);
 
