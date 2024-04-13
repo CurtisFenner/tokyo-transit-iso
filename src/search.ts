@@ -5,6 +5,7 @@ import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
 import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircleDistanceKm } from "./geometry";
 import { WalkingLocus, generateWalkingPolys } from "./poly";
+import { printTimeTree } from "./timer";
 
 function toTimestamp(n: number) {
 	const minutes = (n % 60).toFixed(0).padStart(2, "0");
@@ -21,14 +22,10 @@ const map = new maplibregl.Map({
 
 async function loadMatrices(): Promise<Matrices> {
 	const fet = fetch("generated/morning-matrix.json.gze");
-	console.log("fet:", fet);
 	const f = await fet;
-	console.log("f:", f);
 	const gzipBlob = await f.blob();
-	console.log("gzipBlob:", gzipBlob);
 	const decompressedStream = gzipBlob.stream().pipeThrough(new DecompressionStream("gzip"));
 	const decompressedBlob = await new Response(decompressedStream).json();
-	console.log("decompressedBlob", decompressedBlob);
 	return decompressedBlob as Matrices;
 }
 
@@ -279,6 +276,8 @@ async function main() {
 	await sleep(60);
 
 	const stationWalkRegions = generateWalkingPolys(circles);
+
+	console.log(printTimeTree().join("\n"));
 
 	const regionsByLine = groupBy(stationWalkRegions, x => x.locus.train.line);
 
