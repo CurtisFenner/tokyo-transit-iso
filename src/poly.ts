@@ -77,13 +77,14 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 				localEdgeAngles.push({ angle, required: true });
 			}
 
-			const otherPoints: LocalCoordinate[] = [];
 			timed("otherPoints", () => {
+				const otherPoints: LocalCoordinate[] = [];
 				for (let i = 0; i < restrictingArcs.length; i++) {
 					const arc = restrictingArcs[i];
 					otherPoints.push(...arc);
 					otherPoints.push(...pathCircleIntersection(distort, arc, localCenter, radius.radiusKm));
 				}
+
 				for (const p of otherPoints) {
 					localEdgeAngles.push({
 						angle: distort.angleOf(distort.subtract(p, localCenter)),
