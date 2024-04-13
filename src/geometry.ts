@@ -130,8 +130,8 @@ export class LocalPlane {
 	pathIntersections(u: LocalCoordinate[], v: LocalCoordinate[]): LocalCoordinate[] {
 		const out = [];
 		for (let ui = 0; ui + 1 < u.length; ui++) {
+			const su: LocalLine = { a: u[ui], b: u[ui + 1] };
 			for (let vi = 0; vi + 1 < v.length; vi++) {
-				const su: LocalLine = { a: u[ui], b: u[ui + 1] };
 				const sv: LocalLine = { a: v[vi], b: v[vi + 1] };
 				const intersection = this.segmentIntersection(su, sv);
 				if (intersection !== null) {
@@ -292,7 +292,6 @@ export function growingHyperbolas(
 		return null;
 	}
 
-	const resolution = 4;
 	const left: Coordinate[] = [];
 	const right: Coordinate[] = [];
 
@@ -304,8 +303,9 @@ export function growingHyperbolas(
 	};
 	const kiss = distortion.toGlobe(localKiss);
 
-	for (let i = 1; i <= resolution + 1; i++) {
-		const time = startTime + (endTime - startTime) * i / resolution;
+	const resolution = 4;
+	for (const i of [1, 3, 5, 8]) {
+		const time = startTime + (endTime - startTime + STANDARD_WALKING_SPEED_KPH / 60) * i / resolution;
 		const ta: GeoCircle = {
 			coordinate: a.coordinate,
 			radiusKm: aInitialKm + time,

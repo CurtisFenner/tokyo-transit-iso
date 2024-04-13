@@ -10,7 +10,13 @@ export type WalkingLocus = {
 	id: number,
 };
 
-export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { locus: T, poly: Coordinate[] }[] {
+export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
+	locus: T,
+	poly: Coordinate[],
+	external: boolean[],
+	restrictingPaths: Coordinate[][],
+	natural: Coordinate[],
+}[] {
 	const placedCircles = new spatial.Spatial<WalkingLocus>(12);
 	const nonRedundantLoci: T[] = [];
 	timed("non-redundant loci", () => {
@@ -37,7 +43,13 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 		}
 	});
 
-	const polys: { locus: T, poly: Coordinate[] }[] = [];
+	const polys: {
+		locus: T,
+		poly: Coordinate[],
+		external: boolean[],
+		restrictingPaths: Coordinate[][],
+		natural: Coordinate[],
+	}[] = [];
 
 	timed("regions", () => {
 		for (const circle of nonRedundantLoci) {
@@ -72,17 +84,22 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 			const localCenter = distort.toLocal(circle.coordinate);
 			const localEdgeAngles: { angle: number, required: boolean }[] = [];
 			const resolution = 12;
+			const localNatural: LocalCoordinate[] = [];
+			const orthoRadius = radius.radiusKm / Math.cos((Math.PI * 2 / resolution) / 2);
 			for (let k = 0; k < resolution; k++) {
 				const angle = k / resolution * Math.PI * 2 - Math.PI;
 				localEdgeAngles.push({ angle, required: true });
+				localNatural.push(distort.add(localCenter, distort.polar(orthoRadius, angle)));
 			}
+			localNatural.push(localNatural[0]);
+			const natural: Coordinate[] = localNatural.map(x => distort.toGlobe(x));
 
 			timed("otherPoints", () => {
 				const otherPoints: LocalCoordinate[] = [];
 				for (let i = 0; i < restrictingArcs.length; i++) {
 					const arc = restrictingArcs[i];
 					otherPoints.push(...arc);
-					otherPoints.push(...pathCircleIntersection(distort, arc, localCenter, radius.radiusKm));
+					otherPoints.push(...distort.pathIntersections(arc, localNatural));
 				}
 
 				for (const p of otherPoints) {
@@ -94,7 +111,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 			});
 
 			const poly: Coordinate[] = [];
-			const orthoRadius = radius.radiusKm / Math.cos((Math.PI * 2 / resolution) / 2);
+			const external: boolean[] = [];
 			timed("raycasting", () => {
 				const restrictingSegments = restrictingArcs.flatMap(arc => {
 					const segments = [];
@@ -108,16 +125,37 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): { lo
 					restrictingSegments
 				));
 
+				const naturalIndex = new spatial.PolarIndex(
+					localNatural.map((_, i) => {
+						return {
+							a: distort.subtract(localNatural[i], localCenter),
+							b: distort.subtract(localNatural[(i + 1) % localNatural.length], localCenter),
+						}
+					})
+				);
+
 				for (const { angle, required } of localEdgeAngles.sort((a, b) => a.angle - b.angle)) {
 					const toEdge = distort.polar(orthoRadius, angle);
-					const hit = polarIndex.castTo(distort, toEdge);
-					if (!required && hit === toEdge) {
+					const toNatural = naturalIndex.castTo(distort, toEdge);
+					const hit = polarIndex.castTo(distort, toNatural);
+					if (!required && hit === toNatural) {
 						continue;
 					}
 					poly.push(distort.toGlobe(distort.add(localCenter, hit)));
+					external.push(required && hit === toNatural);
 				}
 			});
-			polys.push({ locus: circle, poly });
+			natural.push(natural[0]);
+
+			polys.push({
+				locus: circle,
+				poly,
+				external,
+				restrictingPaths: restrictingArcs.map(arc =>
+					arc.map(local => distort.toGlobe(local)),
+				),
+				natural,
+			});
 		}
 	});
 	return polys;

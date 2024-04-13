@@ -288,6 +288,11 @@ async function main() {
 
 	const regionsByLine = groupBy(stationWalkRegions, x => x.locus.train.line);
 
+	const externalSegments = [];
+	const partiallyExternalSegments = [];
+	const restrictingPaths = [];
+	const naturalPaths = [];
+
 	for (const [lineID, polys] of regionsByLine) {
 		const sourceID = "train-radius-" + String(lineID);
 		map.addSource(sourceID, {
@@ -303,6 +308,27 @@ async function main() {
 				properties: {},
 			},
 		});
+		for (const poly of polys) {
+			for (let i = 0; i < poly.poly.length; i++) {
+				const ib = (i + 1) % poly.poly.length;
+				if (poly.external[i] && poly.external[ib]) {
+					externalSegments.push({
+						a: poly.poly[i],
+						b: poly.poly[ib],
+					});
+				} else if (poly.external[i] || poly.external[ib]) {
+					partiallyExternalSegments.push({
+						a: poly.poly[i],
+						b: poly.poly[ib],
+					});
+				}
+			}
+			for (const path of poly.restrictingPaths) {
+				restrictingPaths.push(path);
+			}
+			naturalPaths.push(poly.natural);
+		}
+
 		const lineColor = images.toCSSColor(matrixLineLogos[lineID || -1]?.color || { r: 0.5, g: 0.5, b: 0.5 });
 		const layerID = "train-radius-" + String(lineID) + "-layer";
 		map.addLayer({
@@ -352,30 +378,119 @@ async function main() {
 		});
 	}
 
-	// map.addSource("train-polyline-s", {
-	// 	type: "geojson",
-	// 	data: {
-	// 		type: "Feature",
-	// 		geometry: {
-	// 			type: "MultiLineString",
-	// 			coordinates: allArcs.map(cs => cs.map(c => [c.lon, c.lat])),
-	// 		},
-	// 		properties: {},
-	// 	},
-	// });
-	// map.addLayer({
-	// 	id: "train-polyline",
-	// 	type: "line",
-	// 	source: "train-polyline-s",
-	// 	layout: {
-	// 		"line-cap": "round",
-	// 		"line-join": "round",
-	// 	},
-	// 	paint: {
-	// 		"line-color": "#58A",
-	// 		"line-width": 1,
-	// 	},
-	// });
+	const showBoundaryDebug = false;
+
+	map.addSource("external-edge", {
+		type: "geojson",
+		data: {
+			type: "Feature",
+			geometry: {
+				type: "MultiLineString",
+				coordinates: externalSegments.map(cs => [
+					[cs.a.lon, cs.a.lat],
+					[cs.b.lon, cs.b.lat],
+				]),
+			},
+			properties: {},
+		},
+	});
+
+	map.addLayer({
+		id: "external-edge-polyline",
+		type: "line",
+		source: "external-edge",
+		layout: {
+			"line-cap": "round",
+			"line-join": "round",
+		},
+		paint: {
+			"line-color": "black",
+			"line-width": 5,
+		},
+	});
+
+	map.addSource("partially-external-edge", {
+		type: "geojson",
+		data: {
+			type: "Feature",
+			geometry: {
+				type: "MultiLineString",
+				coordinates: partiallyExternalSegments.map(cs => [
+					[cs.a.lon, cs.a.lat],
+					[cs.b.lon, cs.b.lat],
+				]),
+			},
+			properties: {},
+		},
+	});
+
+	map.addLayer({
+		id: "partially-external-edge-polyline",
+		type: "line",
+		source: "partially-external-edge",
+		layout: {
+			"line-cap": "round",
+			"line-join": "round",
+		},
+		paint: {
+			"line-color": "black",
+			"line-width": 5,
+		},
+	});
+
+	map.addSource("restricting-arcs", {
+		type: "geojson",
+		data: {
+			type: "Feature",
+			geometry: {
+				type: "MultiLineString",
+				coordinates: restrictingPaths.map(cs => cs.map(c => [c.lon, c.lat])),
+			},
+			properties: {},
+		},
+	});
+
+	if (showBoundaryDebug) {
+		map.addLayer({
+			id: "restricting-arcs",
+			type: "line",
+			source: "restricting-arcs",
+			layout: {
+
+			},
+			paint: {
+				"line-color": "black",
+				"line-width": 1,
+			},
+		});
+	}
+
+	map.addSource("natural-arcs", {
+		type: "geojson",
+		data: {
+			type: "Feature",
+			geometry: {
+				type: "MultiLineString",
+				coordinates: naturalPaths.map(cs => cs.map(c => [c.lon, c.lat])),
+			},
+			properties: {},
+		},
+	});
+
+	if (showBoundaryDebug) {
+		map.addLayer({
+			id: "natural-arcs",
+			type: "line",
+			source: "natural-arcs",
+			layout: {
+
+			},
+			paint: {
+				"line-color": "#48F",
+				"line-width": 1,
+			},
+		});
+	}
 
 	loadingMessage.textContent = "";
 }
