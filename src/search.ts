@@ -236,8 +236,8 @@ async function main() {
 	const pathingTrainPolyline = [];
 	const pathingWalkPolyline = [];
 
-	const circles: WalkingLocus[] = [];
-	const minuteIsos = [60];
+	const circles: (WalkingLocus & { train: TrainLabel })[] = [];
+	const minuteIso = 60;
 
 	for (const reached of parentEdges.filter(x => x && x.time < 60 * 3)) {
 		const station = matrices.stations[reached.i];
@@ -259,17 +259,11 @@ async function main() {
 			}
 
 			if (parent?.via === "train") {
+				const hoursAfterArrival = Math.max(0, minuteIso - reached.time) / 60;;
 				const circle = {
 					arrivalMinutes: reached.time,
 					coordinate: station.coordinate,
-					radii: minuteIsos.map(timeMinutes => {
-						const hoursAfterArrival = Math.max(0, timeMinutes - reached.time) / 60;
-						const radiusKm = Math.min(WALK_MAX_KM, hoursAfterArrival * STANDARD_WALKING_SPEED_KPH);
-						return {
-							timeMinutes,
-							radiusKm,
-						};
-					}),
+					radiusKm: Math.min(WALK_MAX_KM, hoursAfterArrival * STANDARD_WALKING_SPEED_KPH),
 					train: parent.train.route[0],
 					id: reached.i,
 				};
@@ -378,7 +372,8 @@ async function main() {
 		});
 	}
 
-	const showBoundaryDebug = false;
+	const showBoundaryDebug = new URLSearchParams(window.location.search)
+		.get("boundaryDebug") === "true";
 
 	map.addSource("external-edge", {
 		type: "geojson",

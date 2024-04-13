@@ -4,10 +4,8 @@ import { timed } from "./timer";
 
 export type WalkingLocus = {
 	coordinate: Coordinate,
-	train: TrainLabel,
-	radii: { timeMinutes: number, radiusKm: number }[],
+	radiusKm: number,
 	arrivalMinutes: number,
-	id: number,
 };
 
 export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
@@ -21,8 +19,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
 	const nonRedundantLoci: T[] = [];
 	timed("non-redundant loci", () => {
 		for (const circle of allLoci.sort((a, b) => a.arrivalMinutes - b.arrivalMinutes)) {
-			const radius = circle.radii[circle.radii.length - 1];
-			if (radius.radiusKm <= 1e-3) {
+			if (circle.radiusKm <= 1e-3) {
 				continue;
 			}
 
@@ -53,8 +50,6 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
 
 	timed("regions", () => {
 		for (const circle of nonRedundantLoci) {
-			const radius = circle.radii[circle.radii.length - 1];
-
 			// Step by minute.
 			// Find intersections with neighbors.
 
@@ -63,14 +58,14 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
 			const restrictingArcs: LocalCoordinate[][] = [];
 			timed("restrictingArcs", () => {
 				for (const neighbor of placedCircles.nearby(circle.coordinate, WALK_MAX_KM * 2)) {
-					const neighborRadius = neighbor.radii[circle.radii.length - 1].radiusKm;
+					const neighborRadius = neighbor.radiusKm;
 					const distance = earthGreatCircleDistanceKm(circle.coordinate, neighbor.coordinate);
-					if (distance >= radius.radiusKm + neighborRadius || neighbor.id === circle.id) {
+					if (distance >= circle.radiusKm + neighborRadius || neighbor === circle) {
 						continue;
 					}
 
 					const arc = growingHyperbolas(
-						{ coordinate: circle.coordinate, radiusKm: radius.radiusKm },
+						{ coordinate: circle.coordinate, radiusKm: circle.radiusKm },
 						(STANDARD_WALKING_SPEED_KPH / 60) * -circle.arrivalMinutes,
 						{ coordinate: neighbor.coordinate, radiusKm: neighborRadius },
 						(STANDARD_WALKING_SPEED_KPH / 60) * -neighbor.arrivalMinutes,
@@ -85,7 +80,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
 			const localEdgeAngles: { angle: number, required: boolean }[] = [];
 			const resolution = 12;
 			const localNatural: LocalCoordinate[] = [];
-			const orthoRadius = radius.radiusKm / Math.cos((Math.PI * 2 / resolution) / 2);
+			const orthoRadius = circle.radiusKm / Math.cos((Math.PI * 2 / resolution) / 2);
 			for (let k = 0; k < resolution; k++) {
 				const angle = k / resolution * Math.PI * 2 - Math.PI;
 				localEdgeAngles.push({ angle, required: true });
