@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<script>
+
+	async function getImageColor(image) {
+		// Wait until the image is loaded.
+		await new Promise((resolve, reject) => {
+			if (image.complete) {
+				resolve(image);
+			} else {
+				image.onload = () => resolve(image);
+				image.onerror = e => reject(e);
+			}
+		});
+
+		const canvas = document.createElement("canvas");
+		canvas.width = 20;
+		canvas.height = 20;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) {
+			throw new Error("canvas is not supported");
+		}
+
+		ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+		try {
+			const srgb = ctx.getImageData(0, 0, canvas.width, canvas.height, { colorSpace: "srgb" });
+
+			let rs = 0;
+			let gs = 0;
+			let bs = 0;
+			let ws = 0;
+			for (let i = 0; i < srgb.data.length; i += 4) {
+				const r = srgb.data[i];
+				const g = srgb.data[i + 1];
+				const b = srgb.data[i + 2];
+				const a = srgb.data[i + 3];
+
+				const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+				const weight = (saturation + 1) * a;
+				ws += weight;
+				rs += r * weight;
+				gs += g * weight;
+				bs += b * weight;
+			}
+
+			const out = {
+				r: Math.round(rs / ws),
+				g: Math.round(gs / ws),
+				b: Math.round(bs / ws),
+			};
+			return out;
+		} catch (e) {
+			console.error("could not load:", e);
+			return { r: 0, g: 0, b: 0 };
+		}
+	}
+
+	function imagePromise(src) {
+		return new Promise((resolve, reject) => {
+			const img = document.createElement("img");
+			img.src = src;
+			img.onload = () => resolve(img);
+			img.onerror = reject;
+		});
+	}
+
+	async function fetchLogoAtlasRectangles() {
+		const f = await fetch("logos.json");
+		return await f.json();
+	}
+
+	async function main() {
+		const logoAtlas = await imagePromise("logos.png");
+
+		const canvas = document.createElement("canvas");
+		canvas.width = logoAtlas.width;
+		canvas.height = 64;
+		document.body.appendChild(canvas);
+		const ctx = canvas.getContext("2d");
+		if (!ctx) {
+			console.error("RenderingContext2D could not be made");
+			return new Map();
+		}
+
+		const out = new Map();
+		const data = await fetchLogoAtlasRectangles();
+		for (const [key, portion] of Object.entries(data)) {
+			const portionWidth = portion.right - portion.left;
+			const portionHeight = portion.bottom - portion.top;
+			const destinationWidth = Math.floor(canvas.height / portionHeight * portionWidth);
+			canvas.width = destinationWidth;
+			ctx.clearRect(-1, -1, canvas.width + 2, canvas.height + 2);
+			ctx.drawImage(logoAtlas, portion.left, portion.top, portionWidth, portionHeight, 0, 0, destinationWidth, canvas.height);
+			const blob = await new Promise(resolve => canvas.toBlob(resolve));
+			if (!blob) {
+				continue;
+			}
+
+			const img = await imagePromise(URL.createObjectURL(blob));
+			const color = await getImageColor(img);
+			out.set(key, { color, src: img.src });
+
+			portion.color = color;
+		}
+
+		canvas.parentElement?.removeChild(canvas);
+
+		const textarea = document.createElement("textarea");
+		textarea.textContent = JSON.stringify(data);
+		textarea.disabled = true;
+		document.body.appendChild(textarea);
+	}
+
+	main();
+
+</script>
