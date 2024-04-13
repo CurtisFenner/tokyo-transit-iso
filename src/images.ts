@@ -2,47 +2,17 @@ export type Color = { r: number, g: number, b: number };
 
 const imageColorCache: Record<string, Color> = {};
 
-export type Rect = { left: number, right: number, top: number, bottom: number };
+export type LogoRect = { left: number, right: number, top: number, bottom: number, color: Color };
 
-export async function fetchLogoAtlasRectangles(): Promise<Record<string, Rect>> {
+export async function fetchLogoAtlasRectangles(): Promise<Record<string, LogoRect>> {
 	const f = await fetch("wikidata/logos.json");
 	return await f.json();
 }
 
-export async function loadLineLogos(): Promise<Map<string, { src: string; color: Color; }>> {
-	const logoAtlasRectangles = await fetchLogoAtlasRectangles();
-	const logoAtlas = await imagePromise("wikidata/logos.png");
-
-	const canvas = document.createElement("canvas");
-	canvas.width = logoAtlas.width;
-	canvas.height = 64;
-	canvas.style.display = "hidden";
-	document.body.appendChild(canvas);
-	const ctx = canvas.getContext("2d");
-	if (!ctx) {
-		console.error("RenderingContext2D could not be made");
-		return new Map();
-	}
-
-	const out = new Map<string, { src: string, color: Color }>();
-	for (const [key, portion] of Object.entries(logoAtlasRectangles)) {
-		const portionWidth = portion.right - portion.left;
-		const portionHeight = portion.bottom - portion.top;
-		const destinationWidth = Math.floor(canvas.height / portionHeight * portionWidth);
-		canvas.width = destinationWidth;
-		ctx.clearRect(-1, -1, canvas.width + 2, canvas.height + 2);
-		ctx.drawImage(logoAtlas, portion.left, portion.top, portionWidth, portionHeight, 0, 0, destinationWidth, canvas.height);
-		const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve));
-		if (!blob) {
-			continue;
-		}
-		const img = await imagePromise(URL.createObjectURL(blob));
-		const color = await getImageColor(img);
-		out.set(key, { color, src: img.src });
-	}
-
-	canvas.parentElement?.removeChild(canvas);
-	return out;
+export async function loadLineLogos(): Promise<{ rectangles: Record<string, LogoRect>, atlas: HTMLImageElement }> {
+	const rectangles = await fetchLogoAtlasRectangles();
+	const atlas = await imagePromise("wikidata/logos.png");
+	return { rectangles, atlas };
 }
 
 export function imagePromise(src: string): Promise<HTMLImageElement> {

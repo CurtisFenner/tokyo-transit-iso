@@ -202,7 +202,7 @@ async function main() {
 			matrixLineLogos.push(undefined);
 			continue;
 		}
-		matrixLineLogos.push(wikiLineLogos.get(matched.qID));
+		matrixLineLogos.push(wikiLineLogos.rectangles[matched.qID]);
 	}
 
 	await sleep(60);

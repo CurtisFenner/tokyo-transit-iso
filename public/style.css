@@ -71,3 +71,8 @@ section>*:first-child {
 .no-hover {
 	pointer-events: none;
 }
+
+img.sliced {
+	object-position: var(--slice-top) var(--slice-left);
+	object-fit: none;
+}

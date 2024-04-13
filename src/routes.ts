@@ -5,7 +5,7 @@ export function renderRoutes(
 	matrices: Matrices,
 	walking: [number, number][][],
 	startStationOffset: number,
-	lineLogos: Array<{ color: images.Color, src: string } | undefined>,
+	lineLogos: Array<images.LogoRect | undefined>,
 ): { table: HTMLTableElement, parentEdges: ParentEdge[] } {
 	const beforeDijkstras = performance.now();
 	const parentEdges = dijkstras(matrices.matrices[0], walking, startStationOffset, matrices)
@@ -36,7 +36,7 @@ type ParentEdge = {
 
 function renderRouteLine(
 	matrices: Matrices,
-	lineLogos: Array<{ color: images.Color, src: string } | undefined>,
+	lineLogos: Array<images.LogoRect | undefined>,
 	v: ParentEdge,
 	parentEdges: {
 		i: number;
