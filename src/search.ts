@@ -6,6 +6,7 @@ import * as spatial from "./spatial";
 import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircleDistanceKm } from "./geometry";
 import { WalkingLocus, generateWalkingPolys } from "./poly";
 import { printTimeTree } from "./timer";
+import { MinHeap } from "./heap";
 
 function toTimestamp(n: number) {
 	const minutes = (n % 60).toFixed(0).padStart(2, "0");
@@ -94,9 +95,16 @@ export function dijkstras(
 		| { via: "train", train: MatrixDistance, from: StationOffset },
 	}[] = [];
 	visited[stationOffset] = { time: 0, parent: null };
-	const queue = [{ stationOffset, time: 0 }];
-	while (queue.length > 0) {
-		queue.sort((a, b) => b.time - a.time);
+
+	const queue = new MinHeap<{ stationOffset: number, time: number }>((a, b) => {
+		if (a.time < b.time) {
+			return "<";
+		}
+		return ">";
+	});
+	queue.push({ stationOffset, time: 0 });
+
+	while (queue.size() > 0) {
 		const top = queue.pop()!;
 		searchLog.push(top);
 
@@ -219,7 +227,6 @@ async function main() {
 	await sleep(60);
 
 	const SHIBUYA = matrices.stations.findIndex(x => x.name.includes("渋谷"))!;
-
 
 	const { table, parentEdges } = renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
 

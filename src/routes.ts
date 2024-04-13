@@ -1,5 +1,6 @@
 import * as images from "./images";
 import { dijkstras, formatTime } from "./search";
+import { timed } from "./timer";
 
 export function renderRoutes(
 	matrices: Matrices,
@@ -8,8 +9,10 @@ export function renderRoutes(
 	lineLogos: Array<images.LogoRect | undefined>,
 ): { table: HTMLTableElement, parentEdges: ParentEdge[] } {
 	const beforeDijkstras = performance.now();
-	const parentEdges = dijkstras(matrices.matrices[0], walking, startStationOffset, matrices)
-		.map((v, i) => ({ ...v, i }));
+	const parentEdges = timed("disjkstras", () => {
+		return dijkstras(matrices.matrices[0], walking, startStationOffset, matrices)
+			.map((v, i) => ({ ...v, i }));
+	});
 	const afterDijkstras = performance.now();
 	console.log(afterDijkstras - beforeDijkstras, "ms dijkstras");
 
