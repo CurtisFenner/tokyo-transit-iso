@@ -1,12 +1,13 @@
 import * as maplibregl from "maplibre-gl";
 import * as images from "./images";
-import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
+import { HACHIKO_COORDINATES, Wikidata, loadWikidata } from "./matchstations";
 import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
 import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircleDistanceKm } from "./geometry";
 import { WalkingLocus, generateWalkingPolys } from "./poly";
-import { printTimeTree } from "./timer";
+import { printTimeTree, timed } from "./timer";
 import { MinHeap } from "./heap";
+import { assignTiles } from "./regions";
 
 function toTimestamp(n: number) {
 	const minutes = (n % 60).toFixed(0).padStart(2, "0");
@@ -276,9 +277,73 @@ async function main() {
 	loadingMessage.textContent = "Rendering map...";
 	await sleep(60);
 
-	const stationWalkRegions = generateWalkingPolys(circles);
+	await addGridRegions(matrixLineLogos, matrices, wikidata, circles);
+
+	// await addHyperbolaRegions(matrixLineLogos, matrices, wikidata, circles);
 
 	console.log(printTimeTree().join("\n"));
+}
+
+function toLonLat(coordinate: Coordinate): [number, number] {
+	return [coordinate.lon, coordinate.lat];
+}
+
+async function addGridRegions(
+	matrixLineLogos: (images.LogoRect | undefined)[],
+	matrices: Matrices,
+	wikidata: Wikidata,
+	circles: (WalkingLocus & { train: TrainLabel })[],
+) {
+	const tiles = await timed("assignTiles", () => assignTiles(circles, {
+		boxSize: 0.5,
+		maxRadiusKm: WALK_MAX_KM,
+		speedKmPerMin: STANDARD_WALKING_SPEED_KPH / 60,
+		maxMinutes: 60,
+	}));
+
+	const tilesByLine = groupBy(tiles, t => t.arrival.train.line);
+	for (const [lineID, tiles] of tilesByLine) {
+		const logoData = matrixLineLogos[lineID || -1];
+		const logoColor = logoData?.color || { r: 0.5, g: 0.5, b: 0.5 };
+		const lineColor = images.toCSSColor(logoColor);
+
+		const sourceID = "hexes-" + lineID;
+		map.addSource(sourceID, {
+			type: "geojson",
+			data: {
+				type: "Feature",
+				geometry: {
+					type: "MultiPolygon",
+					coordinates: tiles
+						.map(tile => [...tile.corners, tile.corners[0]])
+						.map(corners => [corners.map(toLonLat)]),
+				},
+				properties: {},
+			},
+		});
+
+		map.addLayer({
+			id: sourceID + "-fill",
+			type: "fill",
+			source: sourceID,
+			layout: {},
+			paint: {
+				"fill-color": lineColor,
+				"fill-opacity": 0.5,
+				"fill-outline-color": lineColor,
+			},
+		});
+	}
+}
+
+async function addHyperbolaRegions(
+	matrixLineLogos: (images.LogoRect | undefined)[],
+	matrices: Matrices,
+	wikidata: Wikidata,
+	circles: (WalkingLocus & { train: TrainLabel })[],
+) {
+	const stationWalkRegions = generateWalkingPolys(circles);
+
 
 	const regionsByLine = groupBy(stationWalkRegions, x => x.locus.train.line);
 

@@ -1,7 +1,7 @@
 export const EARTH_RADIUS_KM = 6378.1;
 export const STANDARD_WALKING_SPEED_KPH = 4.5;
 export const WALK_MAX_MIN = 30;
-export const WALK_MAX_KM = WALK_MAX_MIN * STANDARD_WALKING_SPEED_KPH * 60;
+export const WALK_MAX_KM = (WALK_MAX_MIN / 60) * STANDARD_WALKING_SPEED_KPH;
 
 export function toSpherical(coordinate: Coordinate) {
 	const latRad = Math.PI * 2 * coordinate.lat / 360;
@@ -61,6 +61,17 @@ export class LocalPlane {
 		return {
 			xKm: a.xKm + b.xKm,
 			yKm: a.yKm + b.yKm,
+		};
+	}
+
+	magnitude(a: LocalCoordinate): number {
+		return Math.sqrt(a.xKm ** 2 + a.yKm ** 2);
+	}
+
+	scale(scale: number, a: LocalCoordinate): LocalCoordinate {
+		return {
+			xKm: scale * a.xKm,
+			yKm: scale * a.yKm,
 		};
 	}
 
