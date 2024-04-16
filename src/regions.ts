@@ -111,8 +111,8 @@ export async function assignTiles<TArrival extends Arrival>(
 		let ys = 0;
 		for (const adjust of corner.adjusts) {
 			const a = local.toLocal(adjust);
-			xs += limitedTo(a.xKm, { near: c.xKm, within: 0.34 * p.boxSize });
-			ys += limitedTo(a.yKm, { near: c.yKm, within: 0.34 * p.boxSize });
+			xs += limitedTo(a.xKm, { near: c.xKm, within: 0.50 * p.boxSize });
+			ys += limitedTo(a.yKm, { near: c.yKm, within: 0.25 * p.boxSize });
 		}
 		xs /= corner.adjusts.length;
 		ys /= corner.adjusts.length;
@@ -146,14 +146,29 @@ export async function assignTiles<TArrival extends Arrival>(
 			let nearest = null;
 			for (const near of nearby) {
 				const distance = earthGreatCircleDistanceKm(tileCenter, near.coordinate);
-				const timeMinutes = near.arrivalMinutes + distance / p.speedKmPerMin - grid.boxSize / p.speedKmPerMin * 0.75;
-				const nearMaxRadius = Math.min(
-					p.maxRadiusKm,
-					(p.maxMinutes - near.arrivalMinutes) * p.speedKmPerMin,
-				);
-				if (timeMinutes < bestMinutes && timeMinutes < p.maxMinutes && distance < nearMaxRadius) {
+				const timeMinutes = near.arrivalMinutes + distance / p.speedKmPerMin;
+				if (timeMinutes < bestMinutes) {
 					nearest = near;
 					bestMinutes = timeMinutes;
+				}
+			}
+
+			if (nearest !== null) {
+				let containedCorners = 0;
+
+				for (let u = -1; u <= 1; u += 2) {
+					for (let v = -1; v <= 1; v += 2) {
+						const tileCorner = local.add(tile.topLeft, { xKm: (u * 0.25 + 0.5) * p.boxSize, yKm: (v * 0.25 + 0.5) * p.boxSize });
+						const distance = earthGreatCircleDistanceKm(local.toGlobe(tileCorner), nearest.coordinate);
+						const timeMinutes = nearest.arrivalMinutes + distance / p.speedKmPerMin;
+
+						if (distance < p.maxRadiusKm && timeMinutes < p.maxMinutes) {
+							containedCorners += 1;
+						}
+					}
+				}
+				if (containedCorners < 2) {
+					nearest = null;
 				}
 			}
 
@@ -165,13 +180,12 @@ export async function assignTiles<TArrival extends Arrival>(
 					p.maxRadiusKm,
 					(p.maxMinutes - nearest.arrivalMinutes) * p.speedKmPerMin,
 				);
-				// console.log("distance:", earthGreatCircleDistanceKm(nearest.coordinate, tileCenter), "of max", nearestMaxRadius);
 				for (let u = tile.gx; u <= tile.gx + 2; u++) {
 					for (let v = tile.gy; v <= tile.gy + 2; v++) {
 						const corner = cornerCoordinate(u, v);
 						const cornerRelative = local.subtract(local.toLocal(corner.coordinate), nearestCenterLocal);
 						const cornerDistance = local.magnitude(cornerRelative)
-						if (cornerDistance >= nearestMaxRadius) {
+						if (cornerDistance >= nearestMaxRadius - p.boxSize * 0.5) {
 							const adjust = local.scale(
 								nearestMaxRadius / cornerDistance,
 								cornerRelative,
