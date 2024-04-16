@@ -71,7 +71,7 @@ export async function assignTiles<TArrival extends Arrival>(
 		maxMinutes: number,
 		speedKmPerMin: number,
 	},
-): Promise<{ corners: Coordinate[], arrival: TArrival }[]> {
+): Promise<{ cells: { corners: Coordinate[], arrival: TArrival }[], debugLines: Coordinate[][] }> {
 	const spatialArrivals = new spatial.Spatial<TArrival>(12);
 	for (const arrival of arrivals) {
 		spatialArrivals.add(arrival);
@@ -126,6 +126,9 @@ export async function assignTiles<TArrival extends Arrival>(
 	};
 	const halfTile: LocalCoordinate = { xKm: grid.boxSize / 2, yKm: grid.boxSize / 2 };
 	const tiles = new Map<string, { tile: HexTile, from: TArrival | null }>();
+
+	const debugLines: Coordinate[][] = [];
+
 	for (const arrival of arrivals) {
 		if (arrival.arrivalMinutes > p.maxMinutes - 1) {
 			continue;
@@ -141,26 +144,27 @@ export async function assignTiles<TArrival extends Arrival>(
 			fresh += 1;
 
 			const tileCenter = local.toGlobe(local.add(tile.topLeft, halfTile));
-			const nearby = spatialArrivals.nearby(tileCenter, p.maxRadiusKm);
-			let bestMinutes = Infinity;
-			let nearest = null;
-			for (const near of nearby) {
+			const nearby = spatialArrivals.nearby(tileCenter, p.maxRadiusKm).map(near => {
 				const distance = earthGreatCircleDistanceKm(tileCenter, near.coordinate);
 				const timeMinutes = near.arrivalMinutes + distance / p.speedKmPerMin;
-				if (timeMinutes < bestMinutes) {
-					nearest = near;
-					bestMinutes = timeMinutes;
-				}
-			}
+				return {
+					station: near,
+					timeMinutes,
+				};
+			}).sort((a, b) => a.timeMinutes - b.timeMinutes);
 
+			let nearest: {
+				station: TArrival;
+				timeMinutes: number;
+			} | null = nearby[0] || null;
 			if (nearest !== null) {
 				let containedCorners = 0;
 
 				for (let u = -1; u <= 1; u += 2) {
 					for (let v = -1; v <= 1; v += 2) {
 						const tileCorner = local.add(tile.topLeft, { xKm: (u * 0.25 + 0.5) * p.boxSize, yKm: (v * 0.25 + 0.5) * p.boxSize });
-						const distance = earthGreatCircleDistanceKm(local.toGlobe(tileCorner), nearest.coordinate);
-						const timeMinutes = nearest.arrivalMinutes + distance / p.speedKmPerMin;
+						const distance = earthGreatCircleDistanceKm(local.toGlobe(tileCorner), nearest.station.coordinate);
+						const timeMinutes = nearest.station.arrivalMinutes + distance / p.speedKmPerMin;
 
 						if (distance < p.maxRadiusKm && timeMinutes < p.maxMinutes) {
 							containedCorners += 1;
@@ -172,25 +176,69 @@ export async function assignTiles<TArrival extends Arrival>(
 				}
 			}
 
-			tiles.set(tile.key, { tile, from: nearest });
+			tiles.set(tile.key, { tile, from: nearest && nearest.station });
 
 			if (nearest !== null) {
-				const nearestCenterLocal = local.toLocal(nearest.coordinate);
-				const nearestMaxRadius = Math.min(
-					p.maxRadiusKm,
-					(p.maxMinutes - nearest.arrivalMinutes) * p.speedKmPerMin,
-				);
-				for (let u = tile.gx; u <= tile.gx + 2; u++) {
+				const stationCenters = nearby.slice(0, 3).map(near => {
+					const maxRadius = Math.min(
+						p.maxRadiusKm,
+						(p.maxMinutes - nearest.station.arrivalMinutes) * p.speedKmPerMin,
+					);
+					return {
+						station: near.station,
+						maxRadius,
+						local: local.toLocal(near.station.coordinate),
+					};
+				});
+				for (let u = tile.gx; u <= tile.gx + 2; u += 2) {
 					for (let v = tile.gy; v <= tile.gy + 2; v++) {
+
 						const corner = cornerCoordinate(u, v);
-						const cornerRelative = local.subtract(local.toLocal(corner.coordinate), nearestCenterLocal);
-						const cornerDistance = local.magnitude(cornerRelative)
-						if (cornerDistance >= nearestMaxRadius - p.boxSize * 0.5) {
+						const cornerLocal = local.toLocal(corner.coordinate);
+						const localToNearest = local.subtract(cornerLocal, stationCenters[0].local);
+
+						const limiters = stationCenters.map(stationCenter => {
+							const toCorner = local.subtract(cornerLocal, stationCenter.local);
+							const distance = local.magnitude(toCorner);
+							const timeMinutes = stationCenter.station.arrivalMinutes + distance / p.speedKmPerMin;
+							const changeRateFromNearest = local.dot(local.unit(localToNearest), local.unit(toCorner));
+
+							return {
+								center: stationCenter.station,
+								timeMinutes,
+								changeRateFromNearest,
+							};
+						});
+
+						const cornerRelativeToNearest = local.subtract(cornerLocal, stationCenters[0].local);
+						const cornerDistanceToNearest = local.magnitude(cornerRelativeToNearest)
+
+						let resize: number[] = [];
+						// External boundary of station
+						resize.push(stationCenters[0].maxRadius);
+
+						for (let k = 1; k < limiters.length; k++) {
+							// traveling T minutes out from current position,
+							// we will be at P.
+							// the travel-time from nearest will be limiters[0].timeMinutes + T
+							// the travel-time from nearest[k] will be limiters[k].timeMinutes + T * limiters[k].changeRateFromNearest
+							// limiters[0].timeMinutes + T = limiters[k].timeMinutes + T * limiters[k].changeRateFromNearest
+							// when
+							// limiters[0].timeMinutes - limiters[k].timeMinutes = T * (limiters[k].changeRateFromNearest - 1)
+							const travelMinutes = (limiters[0].timeMinutes - limiters[k].timeMinutes) / (limiters[k].changeRateFromNearest - limiters[0].changeRateFromNearest);
+							const travelDistance = travelMinutes * p.speedKmPerMin;
+							if (Math.abs(travelDistance) < p.boxSize) {
+								resize.push(cornerDistanceToNearest + travelDistance);
+							}
+						}
+
+						const filteredResize = resize.filter(x => Math.abs(x - cornerDistanceToNearest) <= 2 * p.boxSize);
+						if (filteredResize.length > 0) {
 							const adjust = local.scale(
-								nearestMaxRadius / cornerDistance,
-								cornerRelative,
+								Math.min(...filteredResize) / cornerDistanceToNearest,
+								cornerRelativeToNearest,
 							);
-							corner.adjusts.push(local.toGlobe(local.add(nearestCenterLocal, adjust)));
+							corner.adjusts.push(local.toGlobe(local.add(stationCenters[0].local, adjust)));
 						}
 					}
 				}
@@ -198,7 +246,7 @@ export async function assignTiles<TArrival extends Arrival>(
 		}
 	}
 
-	const out = [];
+	const cells = [];
 	for (const tile of tiles.values()) {
 		if (tile.from === null) {
 			continue;
@@ -213,12 +261,12 @@ export async function assignTiles<TArrival extends Arrival>(
 			adjustedCorner(tile.tile.gx, tile.tile.gy + 1),
 		];
 
-		out.push({
+		cells.push({
 			corners,
 			arrival: tile.from,
 		});
 	}
-	return out;
+	return { cells, debugLines };
 }
 
 export function neighboringRivals<H>(

@@ -301,7 +301,7 @@ async function addGridRegions(
 		maxMinutes: 60,
 	}));
 
-	const tilesByLine = groupBy(tiles, t => t.arrival.train.line);
+	const tilesByLine = groupBy(tiles.cells, t => t.arrival.train.line);
 	for (const [lineID, tiles] of tilesByLine) {
 		const logoData = matrixLineLogos[lineID || -1];
 		const logoColor = logoData?.color || { r: 0.5, g: 0.5, b: 0.5 };
@@ -334,6 +334,32 @@ async function addGridRegions(
 			},
 		});
 	}
+
+	// map.addSource("deb2", {
+	// 	type: "geojson",
+	// 	data: {
+	// 		type: "Feature",
+	// 		geometry: {
+	// 			type: "MultiLineString",
+	// 			coordinates: tiles.debugLines.map(poly => poly.map(toLonLat)),
+	// 		},
+	// 		properties: {},
+	// 	},
+	// });
+
+	// map.addLayer({
+	// 	id: "deb2",
+	// 	type: "line",
+	// 	source: "deb2",
+	// 	layout: {
+	// 		"line-cap": "round",
+	// 		"line-join": "round",
+	// 	},
+	// 	paint: {
+	// 		"line-color": "black",
+	// 		"line-width": 1,
+	// 	},
+	// });
 }
 
 async function addHyperbolaRegions(
@@ -397,7 +423,7 @@ async function addHyperbolaRegions(
 			layout: {},
 			paint: {
 				"fill-color": lineColor,
-				"fill-opacity": 0.5,
+				"fill-opacity": 0.25,
 				"fill-outline-color": lineColor,
 			},
 		});

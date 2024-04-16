@@ -75,6 +75,14 @@ export class LocalPlane {
 		};
 	}
 
+	dot(a: LocalCoordinate, b: LocalCoordinate): number {
+		return a.xKm * b.xKm + a.yKm * b.yKm;
+	}
+
+	unit(v: LocalCoordinate): LocalCoordinate {
+		return this.scale(1 / this.magnitude(v), v);
+	}
+
 	angleOf(v: LocalCoordinate): number {
 		return Math.atan2(v.yKm, v.xKm);
 	}
