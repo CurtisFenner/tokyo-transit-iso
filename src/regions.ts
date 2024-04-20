@@ -1,4 +1,5 @@
 import { LocalCoordinate, LocalPlane, earthGreatCircleDistanceKm, geoMidpoint } from "./geometry";
+import { SimpleGraph, components } from "./graph";
 import * as spatial from "./spatial";
 
 export type Arrival = {
@@ -71,7 +72,11 @@ export async function assignTiles<TArrival extends Arrival>(
 		maxMinutes: number,
 		speedKmPerMin: number,
 	},
-): Promise<{ cells: { corners: Coordinate[], arrival: TArrival }[], debugLines: Coordinate[][] }> {
+): Promise<{
+	corners: Map<`${number},${number}`, Coordinate>,
+	cells: { tile: HexTile, corners: Coordinate[], arrival: TArrival }[],
+	debugLines: Coordinate[][],
+}> {
 	const spatialArrivals = new spatial.Spatial<TArrival>(12);
 	for (const arrival of arrivals) {
 		spatialArrivals.add(arrival);
@@ -98,27 +103,6 @@ export async function assignTiles<TArrival extends Arrival>(
 		const out = { coordinate: local.toGlobe(c), adjusts: [] };
 		cornerCache.set(key, out);
 		return cornerCoordinate(gx, gy);
-	}
-
-	function adjustedCorner(gx: number, gy: number): Coordinate {
-		const corner = cornerCoordinate(gx, gy);
-		if (corner.adjusts.length === 0) {
-			return corner.coordinate;
-		}
-
-		const c = local.toLocal(corner.coordinate);
-		let xs = 0;
-		let ys = 0;
-		for (const adjust of corner.adjusts) {
-			const a = local.toLocal(adjust);
-			xs += limitedTo(a.xKm, { near: c.xKm, within: 0.50 * p.boxSize });
-			ys += limitedTo(a.yKm, { near: c.yKm, within: 0.25 * p.boxSize });
-		}
-		xs /= corner.adjusts.length;
-		ys /= corner.adjusts.length;
-
-		const answer = local.toGlobe({ xKm: xs, yKm: ys });
-		return answer;
 	}
 
 	const grid: HexGrid = {
@@ -246,6 +230,36 @@ export async function assignTiles<TArrival extends Arrival>(
 		}
 	}
 
+	const allCorners = new Map<`${number},${number}`, Coordinate>();
+	function adjustedCorner(gx: number, gy: number): Coordinate {
+		const key: `${number},${number}` = `${gx},${gy}`;
+		const cached = allCorners.get(key);
+		if (cached !== undefined) {
+			return cached;
+		}
+
+		const corner = cornerCoordinate(gx, gy);
+		if (corner.adjusts.length === 0) {
+			allCorners.set(key, corner.coordinate);
+			return corner.coordinate;
+		}
+
+		const c = local.toLocal(corner.coordinate);
+		let xs = 0;
+		let ys = 0;
+		for (const adjust of corner.adjusts) {
+			const a = local.toLocal(adjust);
+			xs += limitedTo(a.xKm, { near: c.xKm, within: 0.50 * p.boxSize });
+			ys += limitedTo(a.yKm, { near: c.yKm, within: 0.25 * p.boxSize });
+		}
+		xs /= corner.adjusts.length;
+		ys /= corner.adjusts.length;
+
+		const answer = local.toGlobe({ xKm: xs, yKm: ys });
+		allCorners.set(key, answer);
+		return answer;
+	}
+
 	const cells = [];
 	for (const tile of tiles.values()) {
 		if (tile.from === null) {
@@ -263,10 +277,141 @@ export async function assignTiles<TArrival extends Arrival>(
 
 		cells.push({
 			corners,
+			tile: tile.tile,
 			arrival: tile.from,
 		});
 	}
-	return { cells, debugLines };
+	return { corners: allCorners, cells, debugLines };
+}
+
+export function groupAndOutlineTiles<TArrival>(
+	grid: { tile: HexTile, arrival: TArrival }[]
+): {
+	arrival: TArrival,
+	tiles: HexTile[],
+	boundary: {
+		inside: `${number},${number}`,
+		outside: `${number},${number}`,
+		fromCorner: `${number},${number}`,
+		toCorner: `${number},${number}`,
+	}[],
+}[] {
+	const index = new Map<`${number},${number}`, { tile: HexTile, arrival: TArrival }>();
+	for (const cell of grid) {
+		const key: `${number},${number}` = `${cell.tile.gx},${cell.tile.gy}`;
+		index.set(key, cell);
+	}
+
+	const graph = new class implements SimpleGraph<{ tile: HexTile, arrival: TArrival }> {
+		neighbors(node: { tile: HexTile, arrival: TArrival }): { tile: HexTile, arrival: TArrival }[] {
+			const tile = node.tile;
+			const keys: `${number},${number}`[] = [
+				`${tile.gx},${tile.gy - 2}`,
+				`${tile.gx + 2},${tile.gy - 1}`,
+				`${tile.gx + 2},${tile.gy + 1}`,
+				`${tile.gx},${tile.gy + 2}`,
+				`${tile.gx - 2},${tile.gy + 1}`,
+				`${tile.gx - 2},${tile.gy - 1}`,
+			];
+			const out = [];
+			for (const key of keys) {
+				const value = index.get(key);
+				if (value !== undefined && value.arrival === node.arrival) {
+					out.push(value);
+				}
+			}
+			return out;
+		}
+	}();
+
+	const patches = components(graph, index.values());
+	return patches.map(patch => {
+		return {
+			arrival: patch[0].arrival,
+			tiles: patch.map(x => x.tile),
+			boundary: getPatchBoundarySegments(patch),
+		};
+	});
+}
+
+function getPatchBoundarySegments(patch: { tile: HexTile }[]): {
+	inside: `${number},${number}`,
+	outside: `${number},${number}`,
+	fromCorner: `${number},${number}`,
+	toCorner: `${number},${number}`,
+}[] {
+	const contained = new Set<`${number},${number}`>();
+	for (const { tile } of patch) {
+		contained.add(`${tile.gx},${tile.gy}`);
+	}
+
+	const outsideEdges: {
+		inside: `${number},${number}`,
+		outside: `${number},${number}`,
+		corners: [`${number},${number}`, `${number},${number}`],
+	}[] = [];
+	for (const node of patch) {
+		const tile = node.tile;
+		const neighbors: [`${number},${number}`, [`${number},${number}`, `${number},${number}`]][] = [
+			[`${tile.gx},${tile.gy - 2}`, [`${tile.gx},${tile.gy}`, `${tile.gx + 2},${tile.gy}`]],
+			[`${tile.gx + 2},${tile.gy - 1}`, [`${tile.gx + 2},${tile.gy}`, `${tile.gx + 2},${tile.gy + 1}`]],
+			[`${tile.gx + 2},${tile.gy + 1}`, [`${tile.gx + 2},${tile.gy + 1}`, `${tile.gx + 2},${tile.gy + 2}`]],
+			[`${tile.gx},${tile.gy + 2}`, [`${tile.gx + 2},${tile.gy + 2}`, `${tile.gx},${tile.gy + 2}`]],
+			[`${tile.gx - 2},${tile.gy + 1}`, [`${tile.gx},${tile.gy + 2}`, `${tile.gx},${tile.gy + 1}`]],
+			[`${tile.gx - 2},${tile.gy - 1}`, [`${tile.gx},${tile.gy + 1}`, `${tile.gx},${tile.gy}`]],
+		];
+		for (const [neighborTile, corners] of neighbors) {
+			if (!contained.has(neighborTile)) {
+				outsideEdges.push({
+					inside: `${tile.gx},${tile.gy}`,
+					outside: neighborTile,
+					corners,
+				});
+			}
+		}
+	}
+
+	const cornerNeighbors = new Map<`${number},${number}`,
+		Map<`${number},${number}`, {
+			inside: `${number},${number}`,
+			outside: `${number},${number}`,
+		}>>();
+	for (const outsideEdge of outsideEdges) {
+		const c0 = cornerNeighbors.get(outsideEdge.corners[0]) || new Map();
+		cornerNeighbors.set(outsideEdge.corners[0], c0);
+
+		const c1 = cornerNeighbors.get(outsideEdge.corners[1]) || new Map();
+		cornerNeighbors.set(outsideEdge.corners[1], c1);
+
+		c0.set(outsideEdge.corners[1], { inside: outsideEdge.inside, outside: outsideEdge.outside });
+		c1.set(outsideEdge.corners[0], { inside: outsideEdge.inside, outside: outsideEdge.outside });
+	}
+
+	const graph = new class implements SimpleGraph<`${number},${number}`> {
+		neighbors(node: `${number},${number}`): `${number},${number}`[] {
+			return [...(cornerNeighbors.get(node) || new Map()).keys()];
+		}
+	}
+
+	const rings = components(graph, cornerNeighbors.keys());
+	if (rings.length === 0) {
+		return [];
+	} else if (rings.length !== 1) {
+		console.error("unexpected topology; got", rings.length, "rings:", rings);
+	}
+
+	const ring = rings[0];
+	const out = [];
+	for (let i = 0; i < ring.length; i++) {
+		const fromCorner = ring[i];
+		const toCorner = ring[(i + 1) % ring.length];
+		out.push({
+			fromCorner,
+			toCorner,
+			...cornerNeighbors.get(fromCorner)!.get(toCorner)!,
+		});
+	}
+	return out;
 }
 
 export function neighboringRivals<H>(

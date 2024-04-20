@@ -7,7 +7,7 @@ import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircle
 import { WalkingLocus, generateWalkingPolys } from "./poly";
 import { printTimeTree, timed } from "./timer";
 import { MinHeap } from "./heap";
-import { assignTiles } from "./regions";
+import { assignTiles, groupAndOutlineTiles } from "./regions";
 
 function toTimestamp(n: number) {
 	const minutes = (n % 60).toFixed(0).padStart(2, "0");
@@ -288,6 +288,14 @@ function toLonLat(coordinate: Coordinate): [number, number] {
 	return [coordinate.lon, coordinate.lat];
 }
 
+function looped<T>(x: T[]): T[] {
+	if (x.length === 0) {
+		throw new Error("looped: must be non empty");
+	}
+
+	return [...x, x[0]];
+}
+
 async function addGridRegions(
 	matrixLineLogos: (images.LogoRect | undefined)[],
 	matrices: Matrices,
@@ -301,22 +309,28 @@ async function addGridRegions(
 		maxMinutes: 60,
 	}));
 
-	const tilesByLine = groupBy(tiles.cells, t => t.arrival.train.line);
-	for (const [lineID, tiles] of tilesByLine) {
+	const patches = timed("groupAndOutlineTiles", () => groupAndOutlineTiles(tiles.cells));
+
+	for (const patch of patches) {
+		const lineID = patch.arrival.train.line;
 		const logoData = matrixLineLogos[lineID || -1];
 		const logoColor = logoData?.color || { r: 0.5, g: 0.5, b: 0.5 };
 		const lineColor = images.toCSSColor(logoColor);
+		const sourceID = "hexes-" + lineID + "/" + Math.random();
 
-		const sourceID = "hexes-" + lineID;
 		map.addSource(sourceID, {
 			type: "geojson",
 			data: {
 				type: "Feature",
 				geometry: {
 					type: "MultiPolygon",
-					coordinates: tiles
-						.map(tile => [...tile.corners, tile.corners[0]])
-						.map(corners => [corners.map(toLonLat)]),
+					coordinates: [
+						[
+							looped(patch.boundary.map(x => x.toCorner))
+								.map(cornerID => tiles.corners.get(cornerID)!)
+								.map(toLonLat),
+						]
+					],
 				},
 				properties: {},
 			},
