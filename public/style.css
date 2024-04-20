@@ -43,7 +43,7 @@ section {
 }
 
 .plastic {
-	background: transparent;
+	background: #FFF2;
 	backdrop-filter: blur(20px);
 	box-shadow: 15px 0 20px black;
 }
