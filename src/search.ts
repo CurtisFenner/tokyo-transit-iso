@@ -281,6 +281,40 @@ async function main() {
 
 	await addGridRegions(matrixLineLogos, matrices, wikidata, circles);
 
+	const isolinesGeojson = await isolines(circles, [60]);
+	const allLines = [];
+	for (const line of isolinesGeojson) {
+		for (const path of line.boundaries) {
+			const geojson = looped(path.map(toLonLat));
+			allLines.push(geojson);
+		}
+	}
+	map.addSource("isolines", {
+		type: "geojson",
+		data: {
+			type: "Feature",
+			geometry: {
+				type: "MultiLineString",
+				coordinates: allLines,
+			},
+			properties: {},
+		},
+	});
+
+	map.addLayer({
+		id: "isolines-polyline",
+		type: "line",
+		source: "isolines",
+		layout: {
+			"line-cap": "round",
+			"line-join": "round",
+		},
+		paint: {
+			"line-color": "black",
+			"line-width": 5,
+		},
+	});
+
 	loadingMessage.textContent = "";
 
 	console.log(printTimeTree().join("\n"));
@@ -297,6 +331,47 @@ function looped<T>(x: T[]): T[] {
 
 	return [...x, x[0]];
 }
+
+async function isolines(
+	circles: (WalkingLocus & { train: TrainLabel })[],
+	times: number[],
+) {
+	const loops = [];
+	for (const maxMinutes of times) {
+		const tiles = await timed(`assignTiles(${maxMinutes})`, () => assignTiles(circles, {
+			boxSize: 0.5,
+			maxRadiusKm: WALK_MAX_KM,
+			speedKmPerMin: STANDARD_WALKING_SPEED_KPH / 60,
+			maxMinutes,
+		}));
+		const allInside = new Set<string>();
+		for (const tile of tiles.cells) {
+			allInside.add(`${tile.tile.gx},${tile.tile.gy}`);
+		}
+		const patches = timed(`groupAndOutlineTiles(${maxMinutes})`, () => {
+			return groupAndOutlineTiles(tiles.cells.map(x => {
+				return {
+					tile: x.tile,
+					arrival: null,
+				};
+			}));
+		});
+
+		const boundaries: Coordinate[][] = [];
+		for (const patch of patches) {
+			for (const boundary of patch.boundaries) {
+				const coordinates = boundary.map(x => x.toCorner).map(cornerID => tiles.corners.get(cornerID)!);
+				boundaries.push(coordinates);
+			}
+		}
+		loops.push({
+			maxMinutes,
+			boundaries,
+		});
+	}
+	return loops;
+}
+
 
 async function addGridRegions(
 	matrixLineLogos: (images.LogoRect | undefined)[],
@@ -318,7 +393,7 @@ async function addGridRegions(
 	for (const patch of patches) {
 		const lineID = patch.arrival.train.line || -1;
 
-		const polygon = looped(patch.boundary.map(x => x.toCorner))
+		const polygon = looped(patch.boundaries[0].map(x => x.toCorner))
 			.map(cornerID => tiles.corners.get(cornerID)!)
 			.map(toLonLat);
 

@@ -289,12 +289,12 @@ export function groupAndOutlineTiles<TArrival>(
 ): {
 	arrival: TArrival,
 	tiles: HexTile[],
-	boundary: {
+	boundaries: {
 		inside: `${number},${number}`,
 		outside: `${number},${number}`,
 		fromCorner: `${number},${number}`,
 		toCorner: `${number},${number}`,
-	}[],
+	}[][],
 }[] {
 	const index = new Map<`${number},${number}`, { tile: HexTile, arrival: TArrival }>();
 	for (const cell of grid) {
@@ -329,7 +329,7 @@ export function groupAndOutlineTiles<TArrival>(
 		return {
 			arrival: patch[0].arrival,
 			tiles: patch.map(x => x.tile),
-			boundary: getPatchBoundarySegments(patch),
+			boundaries: getPatchBoundarySegments(patch),
 		};
 	});
 }
@@ -339,7 +339,7 @@ function getPatchBoundarySegments(patch: { tile: HexTile }[]): {
 	outside: `${number},${number}`,
 	fromCorner: `${number},${number}`,
 	toCorner: `${number},${number}`,
-}[] {
+}[][] {
 	const contained = new Set<`${number},${number}`>();
 	for (const { tile } of patch) {
 		contained.add(`${tile.gx},${tile.gy}`);
@@ -394,24 +394,19 @@ function getPatchBoundarySegments(patch: { tile: HexTile }[]): {
 	}
 
 	const rings = components(graph, cornerNeighbors.keys());
-	if (rings.length === 0) {
-		return [];
-	} else if (rings.length !== 1) {
-		console.error("unexpected topology; got", rings.length, "rings:", rings);
-	}
-
-	const ring = rings[0];
-	const out = [];
-	for (let i = 0; i < ring.length; i++) {
-		const fromCorner = ring[i];
-		const toCorner = ring[(i + 1) % ring.length];
-		out.push({
-			fromCorner,
-			toCorner,
-			...cornerNeighbors.get(fromCorner)!.get(toCorner)!,
-		});
-	}
-	return out;
+	return rings.map(ring => {
+		const out = [];
+		for (let i = 0; i < ring.length; i++) {
+			const fromCorner = ring[i];
+			const toCorner = ring[(i + 1) % ring.length];
+			out.push({
+				fromCorner,
+				toCorner,
+				...cornerNeighbors.get(fromCorner)!.get(toCorner)!,
+			});
+		}
+		return out;
+	});
 }
 
 export function neighboringRivals<H>(
