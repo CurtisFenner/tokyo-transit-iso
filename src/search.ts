@@ -279,7 +279,7 @@ async function main() {
 
 	await addGridRegions(matrixLineLogos, matrices, wikidata, circles);
 
-	// await addHyperbolaRegions(matrixLineLogos, matrices, wikidata, circles);
+	loadingMessage.textContent = "";
 
 	console.log(printTimeTree().join("\n"));
 }
@@ -311,26 +311,32 @@ async function addGridRegions(
 
 	const patches = timed("groupAndOutlineTiles", () => groupAndOutlineTiles(tiles.cells));
 
+	const polygonsByLineID = new Map<number, [number, number][][][]>();
+
 	for (const patch of patches) {
-		const lineID = patch.arrival.train.line;
-		const logoData = matrixLineLogos[lineID || -1];
+		const lineID = patch.arrival.train.line || -1;
+
+		const polygon = looped(patch.boundary.map(x => x.toCorner))
+			.map(cornerID => tiles.corners.get(cornerID)!)
+			.map(toLonLat);
+
+		const linePolygons = polygonsByLineID.get(lineID) || [];
+		linePolygons.push([polygon]);
+		polygonsByLineID.set(lineID, linePolygons);
+	}
+
+	for (const [lineID, linePolygons] of polygonsByLineID) {
+		const logoData = matrixLineLogos[lineID];
 		const logoColor = logoData?.color || { r: 0.5, g: 0.5, b: 0.5 };
 		const lineColor = images.toCSSColor(logoColor);
-		const sourceID = "hexes-" + lineID + "/" + Math.random();
-
+		const sourceID = "hexes-" + lineID;
 		map.addSource(sourceID, {
 			type: "geojson",
 			data: {
 				type: "Feature",
 				geometry: {
 					type: "MultiPolygon",
-					coordinates: [
-						[
-							looped(patch.boundary.map(x => x.toCorner))
-								.map(cornerID => tiles.corners.get(cornerID)!)
-								.map(toLonLat),
-						]
-					],
+					coordinates: linePolygons,
 				},
 				properties: {},
 			},
@@ -348,32 +354,6 @@ async function addGridRegions(
 			},
 		});
 	}
-
-	// map.addSource("deb2", {
-	// 	type: "geojson",
-	// 	data: {
-	// 		type: "Feature",
-	// 		geometry: {
-	// 			type: "MultiLineString",
-	// 			coordinates: tiles.debugLines.map(poly => poly.map(toLonLat)),
-	// 		},
-	// 		properties: {},
-	// 	},
-	// });
-
-	// map.addLayer({
-	// 	id: "deb2",
-	// 	type: "line",
-	// 	source: "deb2",
-	// 	layout: {
-	// 		"line-cap": "round",
-	// 		"line-join": "round",
-	// 	},
-	// 	paint: {
-	// 		"line-color": "black",
-	// 		"line-width": 1,
-	// 	},
-	// });
 }
 
 async function addHyperbolaRegions(
