@@ -2,7 +2,7 @@ type TimeTree = { parent: TimeTree | null, n: number, ms: number, branches: Reco
 
 const rootTimeTree: TimeTree = { parent: null, n: 0, ms: 0, branches: {} };
 let timeLeaf = rootTimeTree;
-export function timed<T>(label: string, f: () => T): T {
+export async function timed<T>(label: string, f: () => Promise<T>): Promise<T> {
 	const branch = timeLeaf.branches[label] || {
 		parent: timeLeaf,
 		n: 0,
@@ -15,7 +15,7 @@ export function timed<T>(label: string, f: () => T): T {
 	const beforeMs = performance.now();
 	try {
 		timeLeaf = branch;
-		out = f();
+		out = await f();
 	} catch (e) {
 		throw e;
 	} finally {

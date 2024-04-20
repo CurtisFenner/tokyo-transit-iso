@@ -8,16 +8,16 @@ export type WalkingLocus = {
 	arrivalMinutes: number,
 };
 
-export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
+export async function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): Promise<{
 	locus: T,
 	poly: Coordinate[],
 	external: boolean[],
 	restrictingPaths: Coordinate[][],
 	natural: Coordinate[],
-}[] {
+}[]> {
 	const placedCircles = new spatial.Spatial<WalkingLocus>(12);
 	const nonRedundantLoci: T[] = [];
-	timed("non-redundant loci", () => {
+	timed("non-redundant loci", async () => {
 		for (const circle of allLoci.sort((a, b) => a.arrivalMinutes - b.arrivalMinutes)) {
 			if (circle.radiusKm <= 1e-3) {
 				continue;
@@ -48,7 +48,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
 		natural: Coordinate[],
 	}[] = [];
 
-	timed("regions", () => {
+	await timed("regions", async () => {
 		for (const circle of nonRedundantLoci) {
 			// Step by minute.
 			// Find intersections with neighbors.
@@ -56,7 +56,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
 			const distort = LocalPlane.nearPoint(circle.coordinate);
 
 			const restrictingArcs: LocalCoordinate[][] = [];
-			timed("restrictingArcs", () => {
+			timed("restrictingArcs", async () => {
 				for (const neighbor of placedCircles.nearby(circle.coordinate, WALK_MAX_KM * 2)) {
 					const neighborRadius = neighbor.radiusKm;
 					const distance = earthGreatCircleDistanceKm(circle.coordinate, neighbor.coordinate);
@@ -89,7 +89,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
 			localNatural.push(localNatural[0]);
 			const natural: Coordinate[] = localNatural.map(x => distort.toGlobe(x));
 
-			timed("otherPoints", () => {
+			await timed("otherPoints", async () => {
 				const otherPoints: LocalCoordinate[] = [];
 				for (let i = 0; i < restrictingArcs.length; i++) {
 					const arc = restrictingArcs[i];
@@ -107,7 +107,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
 
 			const poly: Coordinate[] = [];
 			const external: boolean[] = [];
-			timed("raycasting", () => {
+			timed("raycasting", async () => {
 				const restrictingSegments = restrictingArcs.flatMap(arc => {
 					const segments = [];
 					const relativeArc = arc.map(p => distort.subtract(p, localCenter));
@@ -116,7 +116,7 @@ export function generateWalkingPolys<T extends WalkingLocus>(allLoci: T[]): {
 					}
 					return segments;
 				});
-				const polarIndex = timed("new spatial.PolarIndex", () => new spatial.PolarIndex(
+				const polarIndex = await timed("new spatial.PolarIndex", async () => new spatial.PolarIndex(
 					restrictingSegments
 				));
 

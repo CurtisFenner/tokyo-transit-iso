@@ -2,14 +2,14 @@ import * as images from "./images";
 import { dijkstras, formatTime } from "./search";
 import { timed } from "./timer";
 
-export function renderRoutes(
+export async function renderRoutes(
 	matrices: Matrices,
 	walking: [number, number][][],
 	startStationOffset: number,
 	lineLogos: Array<images.LogoRect | undefined>,
-): { table: HTMLTableElement, parentEdges: ParentEdge[] } {
+): Promise<{ table: HTMLTableElement, parentEdges: ParentEdge[] }> {
 	const beforeDijkstras = performance.now();
-	const parentEdges = timed("disjkstras", () => {
+	const parentEdges = await timed("disjkstras", async () => {
 		return dijkstras(matrices.matrices[0], walking, startStationOffset, matrices)
 			.map((v, i) => ({ ...v, i }));
 	});

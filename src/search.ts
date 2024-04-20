@@ -231,7 +231,7 @@ async function main() {
 
 	const SHIBUYA = matrices.stations.findIndex(x => x.name.includes("渋谷"))!;
 
-	const { table, parentEdges } = renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
+	const { table, parentEdges } = await renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
 
 	document.getElementById("results")!.appendChild(table);
 	await sleep(60);
@@ -279,9 +279,11 @@ async function main() {
 	loadingMessage.textContent = "Rendering map...";
 	await sleep(60);
 
-	await addGridRegions(matrixLineLogos, matrices, wikidata, circles);
+	const times = [120, 100, 80, 60, 40, 20];
 
-	const isolinesGeojson = await isolines(circles, [60]);
+	await addGridRegions(matrixLineLogos, matrices, wikidata, circles, times[0]);
+
+	const isolinesGeojson = await timed("isolines", () => isolines(circles, times));
 	const allLines = [];
 	for (const line of isolinesGeojson) {
 		for (const path of line.boundaries) {
@@ -310,8 +312,8 @@ async function main() {
 			"line-join": "round",
 		},
 		paint: {
-			"line-color": "black",
-			"line-width": 5,
+			"line-color": "#444",
+			"line-width": 0.5,
 		},
 	});
 
@@ -348,7 +350,7 @@ async function isolines(
 		for (const tile of tiles.cells) {
 			allInside.add(`${tile.tile.gx},${tile.tile.gy}`);
 		}
-		const patches = timed(`groupAndOutlineTiles(${maxMinutes})`, () => {
+		const patches = await timed(`groupAndOutlineTiles(${maxMinutes})`, async () => {
 			return groupAndOutlineTiles(tiles.cells.map(x => {
 				return {
 					tile: x.tile,
@@ -378,15 +380,16 @@ async function addGridRegions(
 	matrices: Matrices,
 	wikidata: Wikidata,
 	circles: (WalkingLocus & { train: TrainLabel })[],
+	maxMinutes: number,
 ) {
 	const tiles = await timed("assignTiles", () => assignTiles(circles, {
 		boxSize: 0.5,
 		maxRadiusKm: WALK_MAX_KM,
 		speedKmPerMin: STANDARD_WALKING_SPEED_KPH / 60,
-		maxMinutes: 60,
+		maxMinutes,
 	}));
 
-	const patches = timed("groupAndOutlineTiles", () => groupAndOutlineTiles(tiles.cells));
+	const patches = await timed("groupAndOutlineTiles", async () => groupAndOutlineTiles(tiles.cells));
 
 	const polygonsByLineID = new Map<number, [number, number][][][]>();
 
@@ -426,7 +429,7 @@ async function addGridRegions(
 			layout: {},
 			paint: {
 				"fill-color": lineColor,
-				"fill-opacity": 0.5,
+				"fill-opacity": 0.25,
 				"fill-outline-color": lineColor,
 			},
 		});
@@ -439,7 +442,7 @@ async function addHyperbolaRegions(
 	wikidata: Wikidata,
 	circles: (WalkingLocus & { train: TrainLabel })[],
 ) {
-	const stationWalkRegions = generateWalkingPolys(circles);
+	const stationWalkRegions = await generateWalkingPolys(circles);
 
 
 	const regionsByLine = groupBy(stationWalkRegions, x => x.locus.train.line);
