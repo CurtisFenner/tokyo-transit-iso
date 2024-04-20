@@ -19,8 +19,10 @@ const map = new maplibregl.Map({
 	container: document.getElementById("map")!,
 	style: 'maplibre-style.json',
 	center: [HACHIKO_COORDINATES.lon, HACHIKO_COORDINATES.lat],
-	zoom: 9
+	zoom: 9,
+	attributionControl: false,
 });
+map.addControl(new maplibregl.AttributionControl(), "bottom-left");
 
 async function loadMatrices(): Promise<Matrices> {
 	const fet = fetch("generated/morning-matrix.json.gze");
@@ -231,7 +233,7 @@ async function main() {
 
 	const { table, parentEdges } = renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
 
-	document.getElementById("panel")!.appendChild(table);
+	document.getElementById("results")!.appendChild(table);
 	await sleep(60);
 
 	const pathingTrainPolyline = [];
@@ -576,3 +578,23 @@ async function addHyperbolaRegions(
 }
 
 main();
+
+for (const collapser of document.body.getElementsByClassName("collapser")) {
+	if (!(collapser instanceof HTMLButtonElement)) {
+		throw new Error("collapser class should only be applied to buttons");
+	}
+
+	let collapsed = false;
+	collapser.onclick = () => {
+		collapsed = !collapsed;
+		if (collapsed) {
+			collapser.parentElement!.style.right = "calc(1.5rem - var(--full-width))";
+			collapser.style.transform = "rotate(180deg)";
+		} else {
+			collapser.parentElement!.style.right = "0px";
+			collapser.style.transform = "rotate(0deg)";
+		}
+	};
+
+	collapser.disabled = false;
+}

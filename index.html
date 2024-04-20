@@ -1,20 +1,23 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Dynamic Map Demo</title>
-        <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
-        <link rel="stylesheet" href="/style.css" />
-        <link href='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css' rel='stylesheet' />
-    </head>
-    <body>
-        <div style="position: fixed; width: 100%; height: 100%;">
-            <div id="map" style="position: relative; width: 100%; height: 100%"></div>
-        </div>
-        <section id="panel" class="panel scroll-y" style="position: fixed; right: 0; top: 0; bottom: 0;">
-            <h1>Routes from <ruby>渋谷<rt>しぶや</rt></ruby></h1>
-            <i id="loading-message">Waiting for scripts...</i>
-        </section>
+	<head>
+		<meta charset="utf-8">
+		<title>Dynamic Map Demo</title>
+		<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+		<link rel="stylesheet" href="/style.css" />
+		<link href='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css' rel='stylesheet' />
+	</head>
+	<body>
+		<div style="position: fixed; width: 100%; height: 100%;">
+			<div id="map" style="position: relative; width: 100%; height: 100%"></div>
+		</div>
+		<section id="panel" class="panel plastic" style="position: fixed; right: 0; top: 0; bottom: 0;">
+			<button class="collapser" disabled>⮞</button>
+			<div style="padding: 1.5rem; height: 100%; width: calc(100% - 3rem);" id="results" class="scroll-y">
+				<h1>Routes from <ruby>渋谷<rt>しぶや</rt></ruby></h1>
+				<i id="loading-message">Waiting for scripts...</i>
+			</div>
+		</section>
 		<script type="module" src="/src/search.ts"></script>
-    </body>
+	</body>
 </html>
