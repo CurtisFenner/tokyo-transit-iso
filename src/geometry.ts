@@ -1,7 +1,5 @@
 export const EARTH_RADIUS_KM = 6378.1;
 export const STANDARD_WALKING_SPEED_KPH = 4.5;
-export const WALK_MAX_MIN = 30;
-export const WALK_MAX_KM = (WALK_MAX_MIN / 60) * STANDARD_WALKING_SPEED_KPH;
 
 export function toSpherical(coordinate: Coordinate) {
 	const latRad = Math.PI * 2 * coordinate.lat / 360;

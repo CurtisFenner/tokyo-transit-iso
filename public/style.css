@@ -68,6 +68,7 @@ section>*:first-child {
 	user-select: text;
 	width: var(--full-width);
 	padding-left: 3rem;
+	padding-right: 3rem;
 	transition: right 0.5s ease-in-out;
 }
 

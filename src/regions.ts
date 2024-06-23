@@ -67,7 +67,7 @@ function limitedTo(x: number, { near, within }: { near: number, within: number }
 export async function assignTiles<TArrival extends Arrival>(
 	arrivals: TArrival[],
 	p: {
-		boxSize: number,
+		boxKm: number,
 		maxRadiusKm: number,
 		maxMinutes: number,
 		speedKmPerMin: number,
@@ -97,8 +97,8 @@ export async function assignTiles<TArrival extends Arrival>(
 		// approximation of where the edge would be.
 		// Nudge the corner towards that.
 		const c = {
-			xKm: gx * p.boxSize / 2 + (0) * p.boxSize / 6,
-			yKm: gy * p.boxSize / 2 + (0) * p.boxSize / 6,
+			xKm: gx * p.boxKm / 2 + (0) * p.boxKm / 6,
+			yKm: gy * p.boxKm / 2 + (0) * p.boxKm / 6,
 		};
 		const out = { coordinate: local.toGlobe(c), adjusts: [] };
 		cornerCache.set(key, out);
@@ -106,7 +106,7 @@ export async function assignTiles<TArrival extends Arrival>(
 	}
 
 	const grid: HexGrid = {
-		boxSize: p.boxSize,
+		boxSize: p.boxKm,
 	};
 	const halfTile: LocalCoordinate = { xKm: grid.boxSize / 2, yKm: grid.boxSize / 2 };
 	const tiles = new Map<string, { tile: HexTile, from: TArrival | null }>();
@@ -146,7 +146,7 @@ export async function assignTiles<TArrival extends Arrival>(
 
 				for (let u = -1; u <= 1; u += 2) {
 					for (let v = -1; v <= 1; v += 2) {
-						const tileCorner = local.add(tile.topLeft, { xKm: (u * 0.25 + 0.5) * p.boxSize, yKm: (v * 0.25 + 0.5) * p.boxSize });
+						const tileCorner = local.add(tile.topLeft, { xKm: (u * 0.25 + 0.5) * p.boxKm, yKm: (v * 0.25 + 0.5) * p.boxKm });
 						const distance = earthGreatCircleDistanceKm(local.toGlobe(tileCorner), nearest.station.coordinate);
 						const timeMinutes = nearest.station.arrivalMinutes + distance / p.speedKmPerMin;
 
@@ -211,12 +211,12 @@ export async function assignTiles<TArrival extends Arrival>(
 							// limiters[0].timeMinutes - limiters[k].timeMinutes = T * (limiters[k].changeRateFromNearest - 1)
 							const travelMinutes = (limiters[0].timeMinutes - limiters[k].timeMinutes) / (limiters[k].changeRateFromNearest - limiters[0].changeRateFromNearest);
 							const travelDistance = travelMinutes * p.speedKmPerMin;
-							if (Math.abs(travelDistance) < p.boxSize) {
+							if (Math.abs(travelDistance) < p.boxKm) {
 								resize.push(cornerDistanceToNearest + travelDistance);
 							}
 						}
 
-						const filteredResize = resize.filter(x => Math.abs(x - cornerDistanceToNearest) <= 2 * p.boxSize);
+						const filteredResize = resize.filter(x => Math.abs(x - cornerDistanceToNearest) <= 2 * p.boxKm);
 						if (filteredResize.length > 0) {
 							const adjust = local.scale(
 								Math.min(...filteredResize) / cornerDistanceToNearest,
@@ -249,8 +249,8 @@ export async function assignTiles<TArrival extends Arrival>(
 		let ys = 0;
 		for (const adjust of corner.adjusts) {
 			const a = local.toLocal(adjust);
-			xs += limitedTo(a.xKm, { near: c.xKm, within: 0.50 * p.boxSize });
-			ys += limitedTo(a.yKm, { near: c.yKm, within: 0.25 * p.boxSize });
+			xs += limitedTo(a.xKm, { near: c.xKm, within: 0.50 * p.boxKm });
+			ys += limitedTo(a.yKm, { near: c.yKm, within: 0.25 * p.boxKm });
 		}
 		xs /= corner.adjusts.length;
 		ys /= corner.adjusts.length;

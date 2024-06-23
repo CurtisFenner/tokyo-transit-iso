@@ -3,11 +3,14 @@ import * as images from "./images";
 import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
 import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
-import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircleDistanceKm } from "./geometry";
+import { STANDARD_WALKING_SPEED_KPH, earthGreatCircleDistanceKm } from "./geometry";
 import { printTimeTree, timed } from "./timer";
 import { MinHeap } from "./heap";
 import { assignTiles, groupAndOutlineTiles } from "./regions";
 import * as nomin from "./nomin";
+import ReactDOM from "react-dom/client";
+import React from "react";
+import { PlaceList } from "./components/place-list";
 
 type WalkingLocus = {
 	coordinate: Coordinate,
@@ -35,7 +38,13 @@ async function loadMatrices(): Promise<Matrices> {
 
 type StationOffset = number;
 
-function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
+function walkingMatrix(
+	matrices: Matrices,
+	options: {
+		maxWalkMinutes: number,
+	},
+): [StationOffset, number][][] {
+	const maxWalkKm = STANDARD_WALKING_SPEED_KPH * options.maxWalkMinutes;
 	let count = 0;
 
 	const walkingTransfers: [StationOffset, number][][] = [];
@@ -53,12 +62,12 @@ function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
 	for (let from = 0; from < matrices.stations.length; from++) {
 		const fromStation = matrices.stations[from];
 
-		for (const toStation of grid.nearby(fromStation.coordinate, WALK_MAX_KM)) {
+		for (const toStation of grid.nearby(fromStation.coordinate, maxWalkKm)) {
 			const to = indices.get(toStation)!;
 			const distanceKm = earthGreatCircleDistanceKm(fromStation.coordinate, toStation.coordinate);
 
 			const minutes = distanceKm / STANDARD_WALKING_SPEED_KPH * 60;
-			if (minutes < WALK_MAX_MIN) {
+			if (minutes < options.maxWalkMinutes) {
 				walkingTransfers[from].push([to, minutes] satisfies [StationOffset, number]);
 				walkingTransfers[to].push([from, minutes] satisfies [StationOffset, number]);
 				count += 1;
@@ -101,7 +110,7 @@ export function dijkstras(
 		searchLog.push(top);
 
 		const station = matrices.stations[top.stationOffset];
-		if (earthGreatCircleDistanceKm(station.coordinate, { lat: 35.658514, lon: 139.70133 }) > 150) {
+		if (earthGreatCircleDistanceKm(station.coordinate, HACHIKO_COORDINATES) > 150) {
 			continue;
 		}
 
@@ -210,7 +219,11 @@ async function main() {
 	await sleep(60);
 
 	const before = performance.now();
-	const walking = walkingMatrix(matrices);
+	const options = {
+		maxWalkMinutes: 30,
+		maxJourneyMinutes: 90,
+	};
+	const walking = walkingMatrix(matrices, options);
 	const after = performance.now();
 	console.log(after - before, "ms calculating walking");
 
@@ -230,7 +243,7 @@ async function main() {
 	const circles: (WalkingLocus & { train: TrainLabel })[] = [];
 	const minuteIso = 60;
 
-	for (const reached of parentEdges.filter(x => x && x.time < 60 * 3)) {
+	for (const reached of parentEdges.filter(x => x && x.time < options.maxJourneyMinutes)) {
 		const station = matrices.stations[reached.i];
 
 		const parent = reached.parent;
@@ -254,7 +267,7 @@ async function main() {
 				const circle = {
 					arrivalMinutes: reached.time,
 					coordinate: station.coordinate,
-					radiusKm: Math.min(WALK_MAX_KM, hoursAfterArrival * STANDARD_WALKING_SPEED_KPH),
+					radiusKm: Math.min(options.maxWalkMinutes / 60, hoursAfterArrival) * STANDARD_WALKING_SPEED_KPH,
 					train: parent.train.route[0],
 					id: reached.i,
 				};
@@ -267,11 +280,11 @@ async function main() {
 	loadingMessage.textContent = "Rendering map...";
 	await sleep(60);
 
-	const times = [120, 90, 60, 30];
+	const times = [90];
 
-	await addGridRegions(matrixLineLogos, circles, times[0]);
+	await addGridRegions(matrixLineLogos, circles, options);
 
-	const isolinesGeojson = await timed("isolines", () => isolines(circles, times));
+	const isolinesGeojson = await timed("isolines", () => isolines(circles, times, options));
 	const allLines = [];
 	for (const line of isolinesGeojson) {
 		for (const path of line.boundaries) {
@@ -326,12 +339,15 @@ function looped<T>(x: T[]): T[] {
 async function isolines(
 	circles: (WalkingLocus & { train: TrainLabel })[],
 	times: number[],
+	options: {
+		maxWalkMinutes: number,
+	},
 ) {
 	const loops = [];
 	for (const maxMinutes of times) {
 		const tiles = await timed(`assignTiles(${maxMinutes})`, () => assignTiles(circles, {
-			boxSize: 0.5,
-			maxRadiusKm: WALK_MAX_KM,
+			boxKm: 0.8,
+			maxRadiusKm: options.maxWalkMinutes * STANDARD_WALKING_SPEED_KPH / 60,
 			speedKmPerMin: STANDARD_WALKING_SPEED_KPH / 60,
 			maxMinutes,
 		}));
@@ -363,17 +379,19 @@ async function isolines(
 	return loops;
 }
 
-
 async function addGridRegions(
 	matrixLineLogos: (images.LogoRect | undefined)[],
 	circles: (WalkingLocus & { train: TrainLabel })[],
-	maxMinutes: number,
+	options: {
+		maxWalkMinutes: number,
+		maxJourneyMinutes: number,
+	},
 ) {
 	const tiles = await timed("assignTiles", () => assignTiles(circles, {
-		boxSize: 0.5,
-		maxRadiusKm: WALK_MAX_KM,
+		boxKm: 0.8,
+		maxRadiusKm: options.maxWalkMinutes / 60 * STANDARD_WALKING_SPEED_KPH,
 		speedKmPerMin: STANDARD_WALKING_SPEED_KPH / 60,
-		maxMinutes,
+		maxMinutes: options.maxJourneyMinutes,
 	}));
 
 	const patches = await timed("groupAndOutlineTiles", async () => groupAndOutlineTiles(tiles.cells));
@@ -434,7 +452,7 @@ for (const collapser of document.body.getElementsByClassName("collapser")) {
 	collapser.onclick = () => {
 		collapsed = !collapsed;
 		if (collapsed) {
-			collapser.parentElement!.style.right = "calc(1.5rem - var(--full-width))";
+			collapser.parentElement!.style.right = "calc(-1.5rem - var(--full-width))";
 			collapser.style.transform = "rotate(180deg)";
 		} else {
 			collapser.parentElement!.style.right = "0px";
@@ -464,3 +482,18 @@ inPlace.onkeydown = e => {
 		searchForPlace();
 	}
 };
+
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+	<React.StrictMode>
+		<PlaceList
+			initial={[
+				{
+					name: "Hachiko",
+					maxMinutes: 60,
+					coordinate: HACHIKO_COORDINATES,
+				}
+			]}
+		/>
+	</React.StrictMode>
+);
