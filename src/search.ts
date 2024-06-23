@@ -4,16 +4,11 @@ import { HACHIKO_COORDINATES, Wikidata, loadWikidata } from "./matchstations";
 import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
 import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircleDistanceKm } from "./geometry";
-import { WalkingLocus, generateWalkingPolys } from "./poly";
+import { WalkingLocus } from "./poly";
 import { printTimeTree, timed } from "./timer";
 import { MinHeap } from "./heap";
 import { assignTiles, groupAndOutlineTiles } from "./regions";
-
-function toTimestamp(n: number) {
-	const minutes = (n % 60).toFixed(0).padStart(2, "0");
-	const hours = Math.floor(n / 60).toFixed(0).padStart(2, "0");
-	return `${hours}:${minutes}`;
-}
+import * as nomin from "./nomin";
 
 const map = new maplibregl.Map({
 	container: document.getElementById("map")!,
@@ -67,17 +62,6 @@ function walkingMatrix(matrices: Matrices): [StationOffset, number][][] {
 	}
 
 	return walkingTransfers;
-}
-
-function groupBy<K, V>(seq: V[], f: (v: V) => K): Map<K, V[]> {
-	const out = new Map<K, V[]>();
-	for (const v of seq) {
-		const k = f(v);
-		const list = out.get(k) || [];
-		list.push(v);
-		out.set(k, list);
-	}
-	return out;
 }
 
 export function dijkstras(
@@ -231,9 +215,8 @@ async function main() {
 
 	const SHIBUYA = matrices.stations.findIndex(x => x.name.includes("渋谷"))!;
 
-	const { table, parentEdges } = await renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
+	const { parentEdges } = await renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
 
-	document.getElementById("results")!.appendChild(table);
 	await sleep(60);
 
 	const pathingTrainPolyline = [];
@@ -279,7 +262,7 @@ async function main() {
 	loadingMessage.textContent = "Rendering map...";
 	await sleep(60);
 
-	const times = [120, 100, 80, 60, 40, 20];
+	const times = [120, 90, 60, 30];
 
 	await addGridRegions(matrixLineLogos, matrices, wikidata, circles, times[0]);
 
@@ -312,8 +295,9 @@ async function main() {
 			"line-join": "round",
 		},
 		paint: {
+			"line-opacity": 0.75,
 			"line-color": "#444",
-			"line-width": 0.5,
+			"line-width": 1,
 		},
 	});
 
@@ -429,230 +413,11 @@ async function addGridRegions(
 			layout: {},
 			paint: {
 				"fill-color": lineColor,
-				"fill-opacity": 0.25,
-				"fill-outline-color": lineColor,
+				"fill-opacity": 0.125,
+				"fill-outline-color": images.toCSSColor(logoColor, 0.25),
 			},
 		});
 	}
-}
-
-async function addHyperbolaRegions(
-	matrixLineLogos: (images.LogoRect | undefined)[],
-	matrices: Matrices,
-	wikidata: Wikidata,
-	circles: (WalkingLocus & { train: TrainLabel })[],
-) {
-	const stationWalkRegions = await generateWalkingPolys(circles);
-
-
-	const regionsByLine = groupBy(stationWalkRegions, x => x.locus.train.line);
-
-	const externalSegments = [];
-	const partiallyExternalSegments = [];
-	const restrictingPaths = [];
-	const naturalPaths = [];
-
-	for (const [lineID, polys] of regionsByLine) {
-		const sourceID = "train-radius-" + String(lineID);
-		map.addSource(sourceID, {
-			type: "geojson",
-			data: {
-				type: "Feature",
-				geometry: {
-					type: "MultiPolygon",
-					coordinates: polys
-						.map(poly => [...poly.poly, poly.poly[0]])
-						.map(poly => [poly.map<[number, number]>(c => [c.lon, c.lat])]),
-				},
-				properties: {},
-			},
-		});
-		for (const poly of polys) {
-			for (let i = 0; i < poly.poly.length; i++) {
-				const ib = (i + 1) % poly.poly.length;
-				if (poly.external[i] && poly.external[ib]) {
-					externalSegments.push({
-						a: poly.poly[i],
-						b: poly.poly[ib],
-					});
-				} else if (poly.external[i] || poly.external[ib]) {
-					partiallyExternalSegments.push({
-						a: poly.poly[i],
-						b: poly.poly[ib],
-					});
-				}
-			}
-			for (const path of poly.restrictingPaths) {
-				restrictingPaths.push(path);
-			}
-			naturalPaths.push(poly.natural);
-		}
-
-		const lineColor = images.toCSSColor(matrixLineLogos[lineID || -1]?.color || { r: 0.5, g: 0.5, b: 0.5 });
-		const layerID = "train-radius-" + String(lineID) + "-layer";
-		map.addLayer({
-			id: layerID,
-			type: "fill",
-			source: sourceID,
-			layout: {},
-			paint: {
-				"fill-color": lineColor,
-				"fill-opacity": 0.25,
-				"fill-outline-color": lineColor,
-			},
-		});
-
-		const popup = new maplibregl.Popup({
-			closeButton: false,
-			closeOnClick: false
-		});
-		map.on("mousemove", layerID, e => {
-			if (!e.features) {
-				return
-			}
-
-			const geometry = e.features[0].geometry;
-			const line = matrices.lines[lineID || -1];
-
-			const lines = document.createElement("div");
-			const jpLine = document.createElement("div");
-			jpLine.textContent = line?.name;
-			lines.appendChild(jpLine);
-			const wikiLine = wikidata.matchedLines.get(line);
-			if (wikiLine) {
-				if (wikiLine.line_en) {
-					const enLine = document.createElement("div");
-					enLine.textContent = wikiLine.line_en;
-					lines.appendChild(enLine);
-				}
-			}
-			popup.setLngLat(e.lngLat).setDOMContent(lines).addTo(map);
-			popup._container.classList.add("no-hover");
-		});
-
-		map.on("mouseleave", layerID, e => {
-			if (popup) {
-				popup.remove();
-			}
-		});
-	}
-
-	const showBoundaryDebug = new URLSearchParams(window.location.search)
-		.get("boundaryDebug") === "true";
-
-	map.addSource("external-edge", {
-		type: "geojson",
-		data: {
-			type: "Feature",
-			geometry: {
-				type: "MultiLineString",
-				coordinates: externalSegments.map(cs => [
-					[cs.a.lon, cs.a.lat],
-					[cs.b.lon, cs.b.lat],
-				]),
-			},
-			properties: {},
-		},
-	});
-
-	map.addLayer({
-		id: "external-edge-polyline",
-		type: "line",
-		source: "external-edge",
-		layout: {
-			"line-cap": "round",
-			"line-join": "round",
-		},
-		paint: {
-			"line-color": "black",
-			"line-width": 5,
-		},
-	});
-
-	map.addSource("partially-external-edge", {
-		type: "geojson",
-		data: {
-			type: "Feature",
-			geometry: {
-				type: "MultiLineString",
-				coordinates: partiallyExternalSegments.map(cs => [
-					[cs.a.lon, cs.a.lat],
-					[cs.b.lon, cs.b.lat],
-				]),
-			},
-			properties: {},
-		},
-	});
-
-	map.addLayer({
-		id: "partially-external-edge-polyline",
-		type: "line",
-		source: "partially-external-edge",
-		layout: {
-			"line-cap": "round",
-			"line-join": "round",
-		},
-		paint: {
-			"line-color": "black",
-			"line-width": 5,
-		},
-	});
-
-	map.addSource("restricting-arcs", {
-		type: "geojson",
-		data: {
-			type: "Feature",
-			geometry: {
-				type: "MultiLineString",
-				coordinates: restrictingPaths.map(cs => cs.map(c => [c.lon, c.lat])),
-			},
-			properties: {},
-		},
-	});
-
-	if (showBoundaryDebug) {
-		map.addLayer({
-			id: "restricting-arcs",
-			type: "line",
-			source: "restricting-arcs",
-			layout: {
-
-			},
-			paint: {
-				"line-color": "black",
-				"line-width": 1,
-			},
-		});
-	}
-
-	map.addSource("natural-arcs", {
-		type: "geojson",
-		data: {
-			type: "Feature",
-			geometry: {
-				type: "MultiLineString",
-				coordinates: naturalPaths.map(cs => cs.map(c => [c.lon, c.lat])),
-			},
-			properties: {},
-		},
-	});
-
-	if (showBoundaryDebug) {
-		map.addLayer({
-			id: "natural-arcs",
-			type: "line",
-			source: "natural-arcs",
-			layout: {
-
-			},
-			paint: {
-				"line-color": "#48F",
-				"line-width": 1,
-			},
-		});
-	}
-
-	loadingMessage.textContent = "";
 }
 
 main();
@@ -676,3 +441,23 @@ for (const collapser of document.body.getElementsByClassName("collapser")) {
 
 	collapser.disabled = false;
 }
+
+console.log(nomin.kantoBox);
+
+const inPlace = document.getElementById("in-place") as HTMLInputElement;
+const inPlaceButton = document.getElementById("in-place-button") as HTMLButtonElement;
+
+async function searchForPlace() {
+	if (inPlace.value.trim() !== "") {
+		const results = await nomin.searchForPlace(inPlace.value.trim());
+		for (const result of results) {
+
+		}
+	}
+}
+
+inPlace.onkeydown = e => {
+	if (e.key === "Enter") {
+		searchForPlace();
+	}
+};

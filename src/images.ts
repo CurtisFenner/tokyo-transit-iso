@@ -92,6 +92,6 @@ export function contrastingColor(color: Color): "#000" | "#FFF" {
 	return "#000";
 }
 
-export function toCSSColor(color: Color) {
-	return `rgb(${Math.round(color.r)}, ${Math.round(color.g)}, ${Math.round(color.b)})`;
+export function toCSSColor(color: Color, alpha = 1) {
+	return `rgba(${Math.round(color.r)}, ${Math.round(color.g)}, ${Math.round(color.b)}, ${alpha.toFixed(3)})`;
 }

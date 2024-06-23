@@ -11,16 +11,21 @@
 		<div style="position: fixed; width: 100%; height: 100%;">
 			<div id="map" style="position: relative; width: 100%; height: 100%"></div>
 		</div>
-		<section id="panel" class="panel plastic" style="position: fixed; right: 0; top: 0; bottom: 0;">
+		<section id="panel" class="panel plastic" style="display: flex; flex-direction: column; position: fixed; right: 0; top: 0; bottom: 0;">
 			<button class="collapser" disabled>
 				<img
 					style="width: 100%; height: 100%"
 					src="./right-arrow.svg">
 			</button>
-			<div style="padding: 1.5rem; height: 100%; width: calc(100% - 3rem);" id="results" class="scroll-y">
-				<h1>Routes from <ruby>渋谷<rt>しぶや</rt></ruby></h1>
-				<i id="loading-message">Waiting for scripts...</i>
+			<h2 style="padding-left: 1.5rem; flex: 0 0 4.5rem; height: 4.5rem; line-height: 4.5rem;">How far can trains take me in Tokyo?</h2>
+			<div style="padding: 1.5rem; flex: 1 0 4.5rem; width: calc(100% - 3rem);" class="scroll-y">
+				<label>
+					Search for a place:
+					<input id="in-place" />
+					<button id="in-place-button">Search</button>
+				</label>
 			</div>
+			<div id="loading-message" style="flex: 0 0 3rem; line-height: 3rem; text-overflow: ellipsis; font-style: italic">Waiting for scripts...</div>
 		</section>
 		<script type="module" src="/src/search.ts"></script>
 	</body>

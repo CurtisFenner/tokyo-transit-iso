@@ -44,8 +44,8 @@ section {
 
 .plastic {
 	background: #FFF2;
-	backdrop-filter: blur(20px);
-	box-shadow: 15px 0 20px black;
+	backdrop-filter: blur(25px);
+	box-shadow: 21px 0 28px black;
 }
 
 section>*:first-child {
