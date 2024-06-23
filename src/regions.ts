@@ -1,5 +1,6 @@
 import { LocalCoordinate, LocalPlane, earthGreatCircleDistanceKm, geoMidpoint } from "./geometry";
 import { SimpleGraph, components } from "./graph";
+import { HACHIKO_COORDINATES } from "./matchstations";
 import * as spatial from "./spatial";
 
 export type Arrival = {
@@ -82,7 +83,7 @@ export async function assignTiles<TArrival extends Arrival>(
 		spatialArrivals.add(arrival);
 	}
 
-	const local = LocalPlane.nearPoint(arrivals[0].coordinate);
+	const local = LocalPlane.nearPoint(HACHIKO_COORDINATES);
 
 	const cornerCache = new Map<string, { coordinate: Coordinate, adjusts: Coordinate[] }>();
 	function cornerCoordinate(gx: number, gy: number): { coordinate: Coordinate, adjusts: Coordinate[] } {

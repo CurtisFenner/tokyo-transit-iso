@@ -1,16 +1,15 @@
 import * as maplibregl from "maplibre-gl";
 import * as images from "./images";
 import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
-import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
 import { STANDARD_WALKING_SPEED_KPH, earthGreatCircleDistanceKm } from "./geometry";
 import { printTimeTree, timed } from "./timer";
-import { MinHeap } from "./heap";
 import { assignTiles, groupAndOutlineTiles } from "./regions";
 import * as nomin from "./nomin";
 import ReactDOM from "react-dom/client";
 import React from "react";
 import { PlaceList } from "./components/place-list";
+import { LabeledDistanceGraph, dijkstras } from "./graph";
 
 type WalkingLocus = {
 	coordinate: Coordinate,
@@ -78,82 +77,64 @@ function walkingMatrix(
 	return walkingTransfers;
 }
 
-export function dijkstras(
+export type WalkingEdge = { via: "walking" };
+export type TrainEdge = { via: "train", route: TrainLabel[] };
+
+export function findPathsThroughTrains(
 	trainMatrix: Matrix,
 	walkingMatrix: [StationOffset, number][][],
 	stationOffset: StationOffset,
 	matrices: Matrices,
-) {
+): Map<
+	StationOffset,
+	{ parent: null; distance: number; initial: null }
+	| { parent: number; edge: TrainEdge | WalkingEdge, distance: number }
+> {
 	const trainPenaltyMinutes = 3;
 	const walkPenaltyMinutes = 1;
 
-	const searchLog = [];
+	const paths = dijkstras(
+		new Map([[stationOffset, { distance: 0, initial: null }]]),
+		new class implements LabeledDistanceGraph<StationOffset, TrainEdge | WalkingEdge> {
+			neighbors(fromIndex: StationOffset): {
+				edge: TrainEdge | WalkingEdge,
+				node: StationOffset,
+				distance: number,
+			}[] {
+				const station = matrices.stations[fromIndex];
+				if (earthGreatCircleDistanceKm(station.coordinate, HACHIKO_COORDINATES) > 150) {
+					return [];
+				}
 
-	const visited: {
-		time: number,
-		parent: null
-		| { via: "walk", from: StationOffset }
-		| { via: "train", train: MatrixDistance, from: StationOffset },
-	}[] = [];
-	visited[stationOffset] = { time: 0, parent: null };
+				const walkingNeighbors = [];
+				for (const walkingNeighbor of walkingMatrix[fromIndex]) {
+					walkingNeighbors.push({
+						edge: { via: "walking" } satisfies WalkingEdge,
+						distance: walkPenaltyMinutes + walkingNeighbor[1],
+						node: walkingNeighbor[0],
+					});
+				}
 
-	const queue = new MinHeap<{ stationOffset: number, time: number }>((a, b) => {
-		if (a.time < b.time) {
-			return "<";
-		}
-		return ">";
-	});
-	queue.push({ stationOffset, time: 0 });
+				const trainNeighbors = [];
+				for (const neighbor of trainMatrix.distances[fromIndex]) {
+					if (!neighbor.minutes) {
+						// A null or 0 should be ignored.
+						continue;
+					}
 
-	while (queue.size() > 0) {
-		const top = queue.pop()!;
-		searchLog.push(top);
+					trainNeighbors.push({
+						edge: { via: "train", route: neighbor.route } satisfies TrainEdge,
+						distance: neighbor.minutes.avg + trainPenaltyMinutes,
+						node: neighbor.to,
+					});
+				}
 
-		const station = matrices.stations[top.stationOffset];
-		if (earthGreatCircleDistanceKm(station.coordinate, HACHIKO_COORDINATES) > 150) {
-			continue;
-		}
-
-		// visited[top] must already be updated.
-
-		for (const walkingNeighbor of walkingMatrix[top.stationOffset]) {
-			const arrivalStationOffset = walkingNeighbor[0];
-			const arrivalTime = top.time + walkingNeighbor[1] + walkPenaltyMinutes;
-			if (!visited[arrivalStationOffset] || visited[arrivalStationOffset].time > arrivalTime) {
-				visited[arrivalStationOffset] = {
-					parent: {
-						via: "walk",
-						from: top.stationOffset,
-					},
-					time: arrivalTime,
-				};
-				queue.push({ stationOffset: arrivalStationOffset, time: arrivalTime });
+				return [...walkingNeighbors, ...trainNeighbors];
 			}
 		}
+	);
 
-		for (const neighbor of trainMatrix.distances[top.stationOffset]) {
-			if (!neighbor.minutes) {
-				// A null or 0 should be ignored.
-				continue;
-			}
-
-			const arrivalStationOffset = neighbor.to;
-			const arrivalTime = top.time + neighbor.minutes.avg + trainPenaltyMinutes;
-			if (!visited[arrivalStationOffset] || visited[arrivalStationOffset].time > arrivalTime) {
-				visited[arrivalStationOffset] = {
-					parent: {
-						via: "train",
-						train: neighbor,
-						from: top.stationOffset,
-					},
-					time: arrivalTime,
-				};
-				queue.push({ stationOffset: arrivalStationOffset, time: arrivalTime });
-			}
-		}
-	}
-
-	return visited;
+	return paths;
 }
 
 function pluralize(
@@ -221,7 +202,7 @@ async function main() {
 	const before = performance.now();
 	const options = {
 		maxWalkMinutes: 30,
-		maxJourneyMinutes: 90,
+		maxJourneyMinutes: 60,
 	};
 	const walking = walkingMatrix(matrices, options);
 	const after = performance.now();
@@ -233,7 +214,7 @@ async function main() {
 
 	const SHIBUYA = matrices.stations.findIndex(x => x.name.includes("渋谷"))!;
 
-	const parentEdges = await renderRoutes(matrices, walking, SHIBUYA);
+	const parentEdges = await findPathsThroughTrains(matrices.matrices[0], walking, SHIBUYA, matrices);
 
 	await sleep(60);
 
@@ -241,37 +222,33 @@ async function main() {
 	const pathingWalkPolyline = [];
 
 	const circles: (WalkingLocus & { train: TrainLabel })[] = [];
-	const minuteIso = 60;
 
-	for (const reached of parentEdges.filter(x => x && x.time < options.maxJourneyMinutes)) {
-		const station = matrices.stations[reached.i];
+	for (const [reachedOffset, pathData] of [...parentEdges].filter(kv => kv[1].distance < options.maxJourneyMinutes)) {
+		const station = matrices.stations[reachedOffset];
 
-		const parent = reached.parent;
-		if (parent) {
-			const parentStation = matrices.stations[parent.from];
-			if (parent?.via === "train") {
+		if (pathData.parent !== null) {
+			const parentStation = matrices.stations[pathData.parent];
+			if (pathData.edge.via === "train") {
 				const line: Coordinate[] = [];
-				for (const stop of parent.train.route) {
+				for (const stop of pathData.edge.route) {
 					const viaStation = matrices.stations[stop.departing];
 					line.push(viaStation.coordinate);
 				}
 				line.push(station.coordinate);
 				pathingTrainPolyline.push(line);
-			} else if (parent?.via === "walk") {
-				const line: Coordinate[] = [station.coordinate, parentStation.coordinate];
-				pathingWalkPolyline.push(line);
-			}
 
-			if (parent?.via === "train") {
-				const hoursAfterArrival = Math.max(0, minuteIso - reached.time) / 60;;
+				const hoursAfterArrival = Math.max(0, options.maxJourneyMinutes - pathData.distance) / 60;;
 				const circle = {
-					arrivalMinutes: reached.time,
+					arrivalMinutes: pathData.distance,
 					coordinate: station.coordinate,
 					radiusKm: Math.min(options.maxWalkMinutes / 60, hoursAfterArrival) * STANDARD_WALKING_SPEED_KPH,
-					train: parent.train.route[0],
-					id: reached.i,
+					train: pathData.edge.route[0],
+					id: reachedOffset,
 				};
 				circles.push(circle);
+			} else if (pathData.edge.via === "walking") {
+				const line: Coordinate[] = [station.coordinate, parentStation.coordinate];
+				pathingWalkPolyline.push(line);
 			}
 		}
 	}
@@ -280,7 +257,7 @@ async function main() {
 	loadingMessage.textContent = "Rendering map...";
 	await sleep(60);
 
-	const times = [90];
+	const times = [options.maxJourneyMinutes];
 
 	await addGridRegions(matrixLineLogos, circles, options);
 

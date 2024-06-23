@@ -1,3 +1,5 @@
+import { MinHeap } from "./heap";
+
 export interface SimpleGraph<N> {
 	neighbors(node: N): N[];
 }
@@ -37,4 +39,57 @@ export function components<N>(graph: SimpleGraph<N>, all: Iterable<N>): N[][] {
 	}
 
 	return components;
+}
+
+export interface LabeledDistanceGraph<N, E> {
+	neighbors(n: N): { edge: E, node: N, distance: number }[];
+}
+
+export function dijkstras<N, E, I>(
+	sources: Map<N, { distance: number, initial: I }>,
+	graph: LabeledDistanceGraph<N, E>
+): Map<
+	N,
+	{ parent: null, distance: number, initial: I }
+	| { parent: N, edge: E, distance: number }
+> {
+	const path = new Map<
+		N,
+		{ parent: null, distance: number, initial: I }
+		| { parent: N, edge: E, distance: number }
+	>();
+
+	const queue = new MinHeap<N>((a, b) => {
+		const da = path.get(a)!.distance;
+		const db = path.get(b)!.distance;
+		return da < db ? "<" : ">";
+	});
+
+	for (const [node, source] of sources) {
+		path.set(node, {
+			parent: null,
+			distance: source.distance,
+			initial: source.initial,
+		});
+		queue.push(node);
+	}
+
+	while (queue.size() > 0) {
+		const top = queue.pop();
+		const distance = path.get(top)!.distance;
+
+		for (const connection of graph.neighbors(top)) {
+			const neighborPath = path.get(connection.node);
+			if (neighborPath === undefined || neighborPath.distance > distance + connection.distance) {
+				path.set(connection.node, {
+					parent: top,
+					distance: distance + connection.distance,
+					edge: connection.edge,
+				});
+				queue.push(connection.node);
+			}
+		}
+	}
+
+	return path;
 }
