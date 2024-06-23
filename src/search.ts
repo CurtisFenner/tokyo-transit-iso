@@ -1,14 +1,19 @@
 import * as maplibregl from "maplibre-gl";
 import * as images from "./images";
-import { HACHIKO_COORDINATES, Wikidata, loadWikidata } from "./matchstations";
+import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
 import { renderRoutes } from "./routes";
 import * as spatial from "./spatial";
 import { STANDARD_WALKING_SPEED_KPH, WALK_MAX_KM, WALK_MAX_MIN, earthGreatCircleDistanceKm } from "./geometry";
-import { WalkingLocus } from "./poly";
 import { printTimeTree, timed } from "./timer";
 import { MinHeap } from "./heap";
 import { assignTiles, groupAndOutlineTiles } from "./regions";
 import * as nomin from "./nomin";
+
+type WalkingLocus = {
+	coordinate: Coordinate,
+	radiusKm: number,
+	arrivalMinutes: number,
+};
 
 const map = new maplibregl.Map({
 	container: document.getElementById("map")!,
@@ -215,7 +220,7 @@ async function main() {
 
 	const SHIBUYA = matrices.stations.findIndex(x => x.name.includes("渋谷"))!;
 
-	const { parentEdges } = await renderRoutes(matrices, walking, SHIBUYA, matrixLineLogos);
+	const parentEdges = await renderRoutes(matrices, walking, SHIBUYA);
 
 	await sleep(60);
 
@@ -264,7 +269,7 @@ async function main() {
 
 	const times = [120, 90, 60, 30];
 
-	await addGridRegions(matrixLineLogos, matrices, wikidata, circles, times[0]);
+	await addGridRegions(matrixLineLogos, circles, times[0]);
 
 	const isolinesGeojson = await timed("isolines", () => isolines(circles, times));
 	const allLines = [];
@@ -361,8 +366,6 @@ async function isolines(
 
 async function addGridRegions(
 	matrixLineLogos: (images.LogoRect | undefined)[],
-	matrices: Matrices,
-	wikidata: Wikidata,
 	circles: (WalkingLocus & { train: TrainLabel })[],
 	maxMinutes: number,
 ) {

@@ -39,11 +39,6 @@ function cleanStationName(name: string): string {
 	return name.replace(/\s+/g, "").replace(/[(〔][^()]+[\)〕]/g, "").replace(/駅$/g, "").normalize("NFKD");
 }
 
-function cleanLineName(name: string): string {
-	return name.replace(/\s+/g, "").replace(/[(〔][^()]+[\)〕]/g, "").replace(/(線|ライン)$/g, "").normalize("NFKD");
-}
-
-
 export const HACHIKO_COORDINATES = { lon: 139.7006793, lat: 35.6590699 };
 
 export class Wikidata {
@@ -149,14 +144,6 @@ export class Wikidata {
 				&& (choices.length < 2 || choices[1].score < choices[0].score / 2)
 			) {
 				this.matchedLines.set(line, choices[0].candidateLine);
-			} else {
-				// console.log("\t", matrixStops);
-				// console.log("candidate lines:");
-				// for (const c of choices) {
-				// 	console.log("\t" + c.candidateLine.lineLabel, c.candidateCovered.length + "/" + c.candidateLine.stations.size, "v", c.lineCovered.length + "/" + new Set(line.stops).size);
-				// 	console.log("\t\tmissing ", [...c.candidateLine.stations].map(stationKey => this.stations.get(stationKey)).filter(x => x && !wikiStations.includes(x)).map(x => x?.stationLabel));
-				// }
-				// console.log("");
 			}
 		}
 	}
