@@ -1,13 +1,13 @@
 import * as maplibregl from "maplibre-gl";
 import * as images from "./images";
 import { HACHIKO_COORDINATES, loadWikidata } from "./matchstations";
-import { STANDARD_WALKING_SPEED_KPH } from "./geometry";
+import { STANDARD_WALKING_SPEED_KPH, earthGreatCircleDistanceKm } from "./geometry";
 import { printTimeTree, timed } from "./timer";
 import * as nomin from "./nomin";
 import ReactDOM from "react-dom/client";
 import React from "react";
 import { PlaceList } from "./components/place-list";
-import { WalkingLocus, addGridRegions, findPathsThroughTrains, isolines, loadMatrices, looped, toLonLat, walkingMatrix } from "./search";
+import { StationOffset, WalkingLocus, findPathsThroughTrains, isolines, loadMatrices, looped, toLonLat, walkingMatrix } from "./search";
 
 
 function sleep(ms: number): Promise<number> {
@@ -71,6 +71,59 @@ inPlace.onkeydown = e => {
 	}
 };
 
+type TransitData = {
+	trainOutEdges: MatrixDistance[][],
+	walkingOutEdges: { to: StationOffset, minutes: number }[][],
+	stationCoordinates: Map<StationOffset, Coordinate>,
+};
+
+async function reachableCirclesFrom(
+	transitData: TransitData,
+	source: Coordinate,
+	options: {
+		maxWalkMinutes: number,
+		maxJourneyMinutes: number,
+	},
+): Promise<WalkingLocus[]> {
+	const circles: WalkingLocus[] = [
+		{
+			coordinate: source,
+			radiusKm: Math.min(options.maxWalkMinutes, options.maxJourneyMinutes)
+				* STANDARD_WALKING_SPEED_KPH / 60,
+			arrivalMinutes: 0,
+		},
+	];
+
+	const walkableFromSource = new Map<StationOffset, number>();
+	for (const [stationOffset, coordinate] of transitData.stationCoordinates) {
+		const walkingHours = earthGreatCircleDistanceKm(source, coordinate) / STANDARD_WALKING_SPEED_KPH;
+		const walkingMinutes = walkingHours * 60;
+		if (walkingMinutes < Math.min(options.maxWalkMinutes, options.maxJourneyMinutes)) {
+			walkableFromSource.set(stationOffset, walkingMinutes);
+		}
+	}
+
+	const reachedList = await findPathsThroughTrains(
+		transitData.trainOutEdges,
+		transitData.walkingOutEdges,
+		walkableFromSource,
+	);
+	for (const [stationOffset, path] of reachedList) {
+		if (path.parent !== null && path.edge.via === "train") {
+			const minutesRemainingAfterArrival = Math.max(0, options.maxJourneyMinutes - path.distance);
+			circles.push({
+				coordinate: transitData.stationCoordinates.get(stationOffset)!,
+				radiusKm: Math.min(
+					options.maxWalkMinutes,
+					minutesRemainingAfterArrival,
+				) * (STANDARD_WALKING_SPEED_KPH / 60),
+				arrivalMinutes: path.distance,
+			});
+		}
+	}
+
+	return circles;
+}
 
 async function main() {
 	loadingMessage.textContent = "Waiting for train station map...";
@@ -115,62 +168,29 @@ async function main() {
 	loadingMessage.textContent = "Calculating travel times...";
 	await sleep(60);
 
-	const SHIBUYA = matrices.stations.findIndex(x => x.name.includes("渋谷"))!;
+	const transitData: TransitData = {
+		trainOutEdges: matrices.matrices[0].distances,
+		walkingOutEdges: walking,
+		stationCoordinates: new Map(
+			matrices.stations.map((x, i) => [i, x.coordinate]),
+		),
+	};
 
-	const parentEdges = await findPathsThroughTrains(matrices.matrices[0], walking, SHIBUYA, matrices);
-
-	await sleep(60);
-
-	const pathingTrainPolyline = [];
-	const pathingWalkPolyline = [];
-
-	const circles: (WalkingLocus & { train: TrainLabel })[] = [];
-
-	for (const [reachedOffset, pathData] of [...parentEdges].filter(kv => kv[1].distance < options.maxJourneyMinutes)) {
-		const station = matrices.stations[reachedOffset];
-
-		if (pathData.parent !== null) {
-			const parentStation = matrices.stations[pathData.parent];
-			if (pathData.edge.via === "train") {
-				const line: Coordinate[] = [];
-				for (const stop of pathData.edge.route) {
-					const viaStation = matrices.stations[stop.departing];
-					line.push(viaStation.coordinate);
-				}
-				line.push(station.coordinate);
-				pathingTrainPolyline.push(line);
-
-				const hoursAfterArrival = Math.max(0, options.maxJourneyMinutes - pathData.distance) / 60;;
-				const circle = {
-					arrivalMinutes: pathData.distance,
-					coordinate: station.coordinate,
-					radiusKm: Math.min(options.maxWalkMinutes / 60, hoursAfterArrival) * STANDARD_WALKING_SPEED_KPH,
-					train: pathData.edge.route[0],
-					id: reachedOffset,
-				};
-				circles.push(circle);
-			} else if (pathData.edge.via === "walking") {
-				const line: Coordinate[] = [station.coordinate, parentStation.coordinate];
-				pathingWalkPolyline.push(line);
-			}
-		}
-	}
+	const circles = await reachableCirclesFrom(
+		transitData,
+		{ lat: 35.597726, lon: 139.646598 },
+		options,
+	);
 
 	await sleep(60);
 	loadingMessage.textContent = "Rendering map...";
 	await sleep(60);
 
-	const times = [options.maxJourneyMinutes];
-
-	await addGridRegions(map, matrixLineLogos, circles, options);
-
-	const isolinesGeojson = await timed("isolines", () => isolines(circles, times, options));
+	const isolinesGeojson = await timed("isolines", () => isolines(circles, options.maxJourneyMinutes, options));
 	const allLines = [];
-	for (const line of isolinesGeojson) {
-		for (const path of line.boundaries) {
-			const geojson = looped(path.map(toLonLat));
-			allLines.push(geojson);
-		}
+	for (const path of isolinesGeojson.boundaries) {
+		const geojson = looped(path.map(toLonLat));
+		allLines.push(geojson);
 	}
 	map.addSource("isolines", {
 		type: "geojson",
@@ -186,16 +206,11 @@ async function main() {
 
 	map.addLayer({
 		id: "isolines-polyline",
-		type: "line",
+		type: "fill",
 		source: "isolines",
-		layout: {
-			"line-cap": "round",
-			"line-join": "round",
-		},
 		paint: {
-			"line-opacity": 0.75,
-			"line-color": "#444",
-			"line-width": 1,
+			"fill-color": "gray",
+			"fill-opacity": 0.5,
 		},
 	});
 

@@ -22,18 +22,18 @@ export async function loadMatrices(): Promise<Matrices> {
 	return decompressedBlob as Matrices;
 }
 
-type StationOffset = number;
+export type StationOffset = number;
 
 export function walkingMatrix(
 	matrices: Matrices,
 	options: {
 		maxWalkMinutes: number,
 	},
-): [StationOffset, number][][] {
+): { to: StationOffset, minutes: number }[][] {
 	const maxWalkKm = STANDARD_WALKING_SPEED_KPH * options.maxWalkMinutes;
 	let count = 0;
 
-	const walkingTransfers: [StationOffset, number][][] = [];
+	const walkingTransfers: { to: StationOffset, minutes: number }[][] = [];
 	for (let i = 0; i < matrices.stations.length; i++) {
 		walkingTransfers[i] = [];
 	}
@@ -54,8 +54,8 @@ export function walkingMatrix(
 
 			const minutes = distanceKm / STANDARD_WALKING_SPEED_KPH * 60;
 			if (minutes < options.maxWalkMinutes) {
-				walkingTransfers[from].push([to, minutes] satisfies [StationOffset, number]);
-				walkingTransfers[to].push([from, minutes] satisfies [StationOffset, number]);
+				walkingTransfers[from].push({ to, minutes });
+				walkingTransfers[to].push({ to: from, minutes });
 				count += 1;
 			}
 		}
@@ -68,10 +68,9 @@ export type WalkingEdge = { via: "walking" };
 export type TrainEdge = { via: "train", route: TrainLabel[] };
 
 export function findPathsThroughTrains(
-	trainMatrix: Matrix,
-	walkingMatrix: [StationOffset, number][][],
-	stationOffset: StationOffset,
-	matrices: Matrices,
+	trainMatrix: MatrixDistance[][],
+	walkingMatrix: { to: StationOffset, minutes: number }[][],
+	initialMinutes: Map<StationOffset, number>,
 ): Map<
 	StationOffset,
 	{ parent: null; distance: number; initial: null }
@@ -81,29 +80,28 @@ export function findPathsThroughTrains(
 	const walkPenaltyMinutes = 1;
 
 	const paths = dijkstras(
-		new Map([[stationOffset, { distance: 0, initial: null }]]),
+		new Map(
+			[...initialMinutes].map(entry => {
+				return [entry[0], { distance: entry[1], initial: null }];
+			})
+		),
 		new class implements LabeledDistanceGraph<StationOffset, TrainEdge | WalkingEdge> {
 			neighbors(fromIndex: StationOffset): {
 				edge: TrainEdge | WalkingEdge,
 				node: StationOffset,
 				distance: number,
 			}[] {
-				const station = matrices.stations[fromIndex];
-				if (earthGreatCircleDistanceKm(station.coordinate, HACHIKO_COORDINATES) > 150) {
-					return [];
-				}
-
 				const walkingNeighbors = [];
 				for (const walkingNeighbor of walkingMatrix[fromIndex]) {
 					walkingNeighbors.push({
 						edge: { via: "walking" } satisfies WalkingEdge,
-						distance: walkPenaltyMinutes + walkingNeighbor[1],
-						node: walkingNeighbor[0],
+						distance: walkPenaltyMinutes + walkingNeighbor.minutes,
+						node: walkingNeighbor.to,
 					});
 				}
 
 				const trainNeighbors = [];
-				for (const neighbor of trainMatrix.distances[fromIndex]) {
+				for (const neighbor of trainMatrix[fromIndex]) {
 					if (!neighbor.minutes) {
 						// A null or 0 should be ignored.
 						continue;
@@ -157,46 +155,43 @@ export function looped<T>(x: T[]): T[] {
 }
 
 export async function isolines(
-	circles: (WalkingLocus & { train: TrainLabel })[],
-	times: number[],
+	circles: WalkingLocus[],
+	maxMinutes: number,
 	options: {
 		maxWalkMinutes: number,
 	},
 ) {
-	const loops = [];
-	for (const maxMinutes of times) {
-		const tiles = await timed(`assignTiles(${maxMinutes})`, () => assignTiles(circles, {
-			boxKm: 0.8,
-			maxRadiusKm: options.maxWalkMinutes * STANDARD_WALKING_SPEED_KPH / 60,
-			speedKmPerMin: STANDARD_WALKING_SPEED_KPH / 60,
-			maxMinutes,
-		}));
-		const allInside = new Set<string>();
-		for (const tile of tiles.cells) {
-			allInside.add(`${tile.tile.gx},${tile.tile.gy}`);
-		}
-		const patches = await timed(`groupAndOutlineTiles(${maxMinutes})`, async () => {
-			return groupAndOutlineTiles(tiles.cells.map(x => {
-				return {
-					tile: x.tile,
-					arrival: null,
-				};
-			}));
-		});
-
-		const boundaries: Coordinate[][] = [];
-		for (const patch of patches) {
-			for (const boundary of patch.boundaries) {
-				const coordinates = boundary.map(x => x.toCorner).map(cornerID => tiles.corners.get(cornerID)!);
-				boundaries.push(coordinates);
-			}
-		}
-		loops.push({
-			maxMinutes,
-			boundaries,
-		});
+	const tiles = await timed(`assignTiles(${maxMinutes})`, () => assignTiles(circles, {
+		boxKm: 0.8,
+		maxRadiusKm: options.maxWalkMinutes * STANDARD_WALKING_SPEED_KPH / 60,
+		speedKmPerMin: STANDARD_WALKING_SPEED_KPH / 60,
+		maxMinutes,
+	}));
+	const allInside = new Set<string>();
+	for (const tile of tiles.cells) {
+		allInside.add(`${tile.tile.gx},${tile.tile.gy}`);
 	}
-	return loops;
+	const patches = await timed(`groupAndOutlineTiles(${maxMinutes})`, async () => {
+		return groupAndOutlineTiles(tiles.cells.map(x => {
+			return {
+				tile: x.tile,
+				arrival: null,
+			};
+		}));
+	});
+
+	const boundaries: Coordinate[][] = [];
+	for (const patch of patches) {
+		for (const boundary of patch.boundaries) {
+			const coordinates = boundary.map(x => x.toCorner).map(cornerID => tiles.corners.get(cornerID)!);
+			boundaries.push(coordinates);
+		}
+	}
+
+	return {
+		maxMinutes,
+		boundaries,
+	};
 }
 
 export async function addGridRegions(
