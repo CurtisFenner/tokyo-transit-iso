@@ -22,12 +22,35 @@ function sleep(ms: number): Promise<number> {
 
 const loadingMessage = document.getElementById("loading-message")!;
 
+const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
+	Object.freeze({
+		"lng": 138.0548457793563,
+		"lat": 34.82749433255117,
+	}),
+	Object.freeze({
+		"lng": 142.06704277877105,
+		"lat": 36.43245961371258,
+	}),
+];
+
+const TOKYO_BOUNDS_MARGIN: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
+	Object.freeze({
+		"lng": 138.0548457793563 - 0.25,
+		"lat": 34.82749433255117 - 0.125,
+	}),
+	Object.freeze({
+		"lng": 142.06704277877105 + 0.25,
+		"lat": 36.43245961371258 + 0.125,
+	}),
+];
+
 const map = new maplibregl.Map({
 	container: document.getElementById("map")!,
 	style: 'maplibre-style.json',
 	center: [HACHIKO_COORDINATES.lon, HACHIKO_COORDINATES.lat],
 	zoom: 9,
 	attributionControl: false,
+	maxBounds: TOKYO_BOUNDS,
 });
 map.addControl(new maplibregl.AttributionControl(), "bottom-left");
 
@@ -51,7 +74,9 @@ for (const collapser of document.body.getElementsByClassName("collapser")) {
 	collapser.disabled = false;
 }
 
-console.log(nomin.kantoBox);
+const sourceMarker = new maplibregl.Marker({ draggable: true })
+	.setLngLat(HACHIKO_COORDINATES)
+	.addTo(map);
 
 const inPlace = document.getElementById("in-place") as HTMLInputElement;
 const inPlaceButton = document.getElementById("in-place-button") as HTMLButtonElement;
@@ -125,6 +150,45 @@ async function reachableCirclesFrom(
 	return circles;
 }
 
+async function generateInvertedIsoline(
+	transitData: TransitData,
+	source: Coordinate,
+	options: {
+		maxWalkMinutes: number,
+		maxJourneyMinutes: number,
+	},
+) {
+	const circles = await reachableCirclesFrom(transitData, source, options);
+
+	await sleep(60);
+	loadingMessage.textContent = "Rendering map...";
+	await sleep(60);
+
+	const isolinesGeojson = await timed("isolines", () => isolines(circles, options.maxJourneyMinutes, options));
+	const allLines = [];
+	for (const path of isolinesGeojson.boundaries) {
+		const geojson = looped(path.map(toLonLat));
+		allLines.push(geojson);
+	}
+
+	return {
+		type: "Feature" as const,
+		geometry: {
+			type: "Polygon" as const,
+			coordinates: [
+				[
+					[TOKYO_BOUNDS_MARGIN[0].lng, TOKYO_BOUNDS_MARGIN[0].lat],
+					[TOKYO_BOUNDS_MARGIN[1].lng, TOKYO_BOUNDS_MARGIN[0].lat],
+					[TOKYO_BOUNDS_MARGIN[1].lng, TOKYO_BOUNDS_MARGIN[1].lat],
+					[TOKYO_BOUNDS_MARGIN[0].lng, TOKYO_BOUNDS_MARGIN[1].lat],
+				],
+				...allLines,
+			],
+		},
+		properties: {},
+	};
+}
+
 async function main() {
 	loadingMessage.textContent = "Waiting for train station map...";
 	const matrices = await loadMatrices();
@@ -176,41 +240,45 @@ async function main() {
 		),
 	};
 
-	const circles = await reachableCirclesFrom(
+	const originalGeojson = await generateInvertedIsoline(
 		transitData,
-		{ lat: 35.597726, lon: 139.646598 },
+		HACHIKO_COORDINATES,
 		options,
 	);
 
-	await sleep(60);
-	loadingMessage.textContent = "Rendering map...";
-	await sleep(60);
-
-	const isolinesGeojson = await timed("isolines", () => isolines(circles, options.maxJourneyMinutes, options));
-	const allLines = [];
-	for (const path of isolinesGeojson.boundaries) {
-		const geojson = looped(path.map(toLonLat));
-		allLines.push(geojson);
-	}
-	map.addSource("isolines", {
+	map.addSource("isolines-all", {
 		type: "geojson",
-		data: {
-			type: "Feature",
-			geometry: {
-				type: "MultiLineString",
-				coordinates: allLines,
-			},
-			properties: {},
+		data: originalGeojson,
+	});
+
+	sourceMarker.on("dragend", async () => {
+		const selected = sourceMarker.getLngLat();
+		const source = map.getSource("isolines-all") as maplibregl.GeoJSONSource;
+		const newGeoJSON = await generateInvertedIsoline(
+			transitData,
+			{ lat: selected.lat, lon: selected.lng },
+			options,
+		);
+		source.setData(newGeoJSON);
+	});
+
+	map.addLayer({
+		id: "isolines-fill",
+		type: "fill",
+		source: "isolines-all",
+		paint: {
+			"fill-color": "gray",
+			"fill-opacity": 0.5,
 		},
 	});
 
 	map.addLayer({
 		id: "isolines-polyline",
-		type: "fill",
-		source: "isolines",
+		type: "line",
+		source: "isolines-all",
 		paint: {
-			"fill-color": "gray",
-			"fill-opacity": 0.5,
+			"line-color": "black",
+			"line-width": 3,
 		},
 	});
 
@@ -218,7 +286,6 @@ async function main() {
 
 	console.log(printTimeTree().join("\n"));
 }
-
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
 	<React.StrictMode>
