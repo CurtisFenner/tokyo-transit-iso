@@ -1,6 +1,5 @@
 import * as maplibregl from "maplibre-gl";
 import * as images from "./images";
-import { HACHIKO_COORDINATES } from "./matchstations";
 import * as spatial from "./spatial";
 import { STANDARD_WALKING_SPEED_KPH, earthGreatCircleDistanceKm } from "./geometry";
 import { timed } from "./timer";

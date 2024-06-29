@@ -8,6 +8,7 @@ import ReactDOM from "react-dom/client";
 import React from "react";
 import { PlaceList } from "./components/place-list";
 import { StationOffset, WalkingLocus, findPathsThroughTrains, isolines, loadMatrices, looped, toLonLat, walkingMatrix } from "./search";
+import { geoJSONFromRingForest, groupContainedRings } from "./spatial";
 
 
 function sleep(ms: number): Promise<number> {
@@ -164,29 +165,24 @@ async function generateInvertedIsoline(
 	loadingMessage.textContent = "Rendering map...";
 	await sleep(60);
 
-	const isolinesGeojson = await timed("isolines", () => isolines(circles, options.maxJourneyMinutes, options));
-	const allLines = [];
-	for (const path of isolinesGeojson.boundaries) {
-		const geojson = looped(path.map(toLonLat));
-		allLines.push(geojson);
-	}
+	const rings = await timed("isolines", () => isolines(circles, options.maxJourneyMinutes, options));
 
-	return {
-		type: "Feature" as const,
-		geometry: {
-			type: "Polygon" as const,
-			coordinates: [
+	const geojson = geoJSONFromRingForest(
+		groupContainedRings(
+			[
 				[
-					[TOKYO_BOUNDS_MARGIN[0].lng, TOKYO_BOUNDS_MARGIN[0].lat],
-					[TOKYO_BOUNDS_MARGIN[1].lng, TOKYO_BOUNDS_MARGIN[0].lat],
-					[TOKYO_BOUNDS_MARGIN[1].lng, TOKYO_BOUNDS_MARGIN[1].lat],
-					[TOKYO_BOUNDS_MARGIN[0].lng, TOKYO_BOUNDS_MARGIN[1].lat],
+					{ lon: TOKYO_BOUNDS_MARGIN[0].lng, lat: TOKYO_BOUNDS_MARGIN[0].lat },
+					{ lon: TOKYO_BOUNDS_MARGIN[1].lng, lat: TOKYO_BOUNDS_MARGIN[0].lat },
+					{ lon: TOKYO_BOUNDS_MARGIN[1].lng, lat: TOKYO_BOUNDS_MARGIN[1].lat },
+					{ lon: TOKYO_BOUNDS_MARGIN[0].lng, lat: TOKYO_BOUNDS_MARGIN[1].lat },
+
 				],
-				...allLines,
-			],
-		},
-		properties: {},
-	};
+				...rings.boundaries,
+			]
+		)
+	);
+
+	return geojson;
 }
 
 async function main() {
@@ -248,6 +244,7 @@ async function main() {
 
 	map.addSource("isolines-all", {
 		type: "geojson",
+		lineMetrics: true,
 		data: originalGeojson,
 	});
 

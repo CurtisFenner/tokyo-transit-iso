@@ -353,6 +353,26 @@ function getPatchBoundarySegments(patch: { tile: HexTile }[]): {
 	}[] = [];
 	for (const node of patch) {
 		const tile = node.tile;
+		/**
+		 * When following each of the edges, the central cell is kept on the
+		 * RIGHT of the edge, and the neighboring cell is kept on the LEFT of
+		 * the edge.
+		 * ```
+		 * +               +---------------+               +
+		 * |               |(gx,gy-2)      |               |
+		 * +---------------+     N[0]      +---------------+
+		 * |(gx-2,gy-1)    |               |(gx+2,gy-1)    |
+		 * +     N[5]      0---------------1     N[1]      +
+		 * |               |(gx,gy)        |               |
+		 * +---------------5               2---------------+
+		 * |(gx-2,gy+1)    |               |(gx+2,gy+1)    |
+		 * +     N[4]      4---------------3     N[2]      +
+		 * |               |(gx,gy+2)      |               |
+		 * +---------------+     N[3]      +---------------+
+		 * |               |               |               |
+		 * +               +---------------+               +
+		 * ```
+		 */
 		const neighbors: [`${number},${number}`, [`${number},${number}`, `${number},${number}`]][] = [
 			[`${tile.gx},${tile.gy - 2}`, [`${tile.gx},${tile.gy}`, `${tile.gx + 2},${tile.gy}`]],
 			[`${tile.gx + 2},${tile.gy - 1}`, [`${tile.gx + 2},${tile.gy}`, `${tile.gx + 2},${tile.gy + 1}`]],
@@ -385,7 +405,6 @@ function getPatchBoundarySegments(patch: { tile: HexTile }[]): {
 		cornerNeighbors.set(outsideEdge.corners[1], c1);
 
 		c0.set(outsideEdge.corners[1], { inside: outsideEdge.inside, outside: outsideEdge.outside });
-		c1.set(outsideEdge.corners[0], { inside: outsideEdge.inside, outside: outsideEdge.outside });
 	}
 
 	const graph = new class implements SimpleGraph<`${number},${number}`> {
