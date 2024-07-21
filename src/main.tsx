@@ -187,17 +187,19 @@ async function main() {
 				waiting=<i>Loading transit data...</i>
 				failed={e => <></>}>
 				{transitData => {
-					return <PlaceList
-						isoshade={shadelayers}
-						transitData={transitData}
-						initial={[
-							{
-								name: "Hachiko",
-								maxMinutes: 60,
-								coordinate: HACHIKO_COORDINATES,
-							}
-						]}
-					/>
+					return <>
+						<PlaceList
+							isoshade={shadelayers}
+							transitData={transitData}
+							initial={[
+								{
+									name: "Hachiko",
+									maxMinutes: 60,
+									coordinate: HACHIKO_COORDINATES,
+								}
+							]}
+						/>
+					</>;
 				}}
 			</Waiting>
 		</React.StrictMode>
