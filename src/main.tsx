@@ -35,12 +35,12 @@ const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }]
 
 const TOKYO_BOUNDS_MARGIN: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
 	Object.freeze({
-		"lng": 138.0548457793563 - 0.25,
-		"lat": 34.82749433255117 - 0.125,
+		"lng": 138.0548457793563 - 0.5,
+		"lat": 34.82749433255117 - 0.25,
 	}),
 	Object.freeze({
-		"lng": 142.06704277877105 + 0.25,
-		"lat": 36.43245961371258 + 0.125,
+		"lng": 142.06704277877105 + 0.5,
+		"lat": 36.43245961371258 + 0.25,
 	}),
 ];
 
