@@ -35,7 +35,7 @@ type WikidataStation = {
 	lines: Set<string>,
 };
 
-function cleanStationName(name: string): string {
+export function cleanStationName(name: string): string {
 	return name.replace(/\s+/g, "").replace(/[(〔][^()]+[\)〕]/g, "").replace(/駅$/g, "").normalize("NFKD");
 }
 

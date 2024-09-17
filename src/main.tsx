@@ -1,15 +1,16 @@
 import * as maplibregl from "maplibre-gl";
-import { HACHIKO_COORDINATES } from "./matchstations";
+import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
 import { STANDARD_WALKING_SPEED_KPH, earthGreatCircleDistanceKm } from "./geometry";
 import { printTimeTree, timed } from "./timer";
 import * as nomin from "./nomin";
 import ReactDOM from "react-dom/client";
 import React from "react";
 import { PlaceList, Waiting } from "./components/place-list";
-import { StationOffset, WalkingLocus, findPathsThroughTrains, isolines } from "./search";
+import { StationOffset, WalkingLocus, findPathsThroughTrains, isolines, loadMatrices } from "./search";
 import { geoJSONFromRingForest, groupContainedRings } from "./spatial";
 import { transit30Promise, TransitData } from "./transit-data";
 import { IsoShadeLayer } from "./components/isoshadelayer";
+import { watchClusters } from "./map-helper";
 
 
 function sleep(ms: number): Promise<number> {
@@ -32,6 +33,11 @@ const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }]
 		"lat": 36.43245961371258,
 	}),
 ];
+
+const TOKYO_CENTER = {
+	lat: (TOKYO_BOUNDS[0].lat + TOKYO_BOUNDS[1].lat) / 2,
+	lon: (TOKYO_BOUNDS[0].lng + TOKYO_BOUNDS[1].lng) / 2,
+};
 
 const TOKYO_BOUNDS_MARGIN: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
 	Object.freeze({
@@ -178,6 +184,141 @@ async function main() {
 			req.options,
 		);
 		return iso;
+	});
+
+	const stationLabelsFeatures: {
+		type: "FeatureCollection",
+		features: {
+			type: "Feature",
+			properties: object,
+			geometry: {
+				type: "Point",
+				coordinates: [number, number],
+			},
+		}[],
+	} = {
+		type: "FeatureCollection",
+		features: [],
+	};
+
+	type StationLabelProperties = {
+		nameJa: string,
+		lineCount: number,
+		lat: number,
+		lon: number,
+		index: number,
+	};
+
+	const matrices = await loadMatrices();
+	for (let stationIndex = 0; stationIndex < matrices.stations.length; stationIndex++) {
+		const matrixStation = matrices.stations[stationIndex];
+		const nameJa = cleanStationName(matrixStation.name);
+		const coordinate = matrixStation.coordinate;
+		const lineCount = matrices.lines.filter(x => x.stops.includes(stationIndex)).length;
+
+		stationLabelsFeatures.features.push({
+			type: "Feature",
+			properties: {
+				nameJa,
+				lineCount,
+				lat: coordinate.lat,
+				lon: coordinate.lon,
+				index: stationIndex,
+			} satisfies StationLabelProperties,
+			geometry: {
+				type: "Point",
+				coordinates: [coordinate.lon, coordinate.lat],
+			},
+		});
+	}
+
+	map.addSource("station_names", {
+		type: "geojson",
+		data: stationLabelsFeatures,
+		cluster: true,
+		clusterRadius: 35,
+	});
+
+	map.addLayer({
+		'id': 'earthquake_circle_true',
+		'type': 'circle',
+		'source': 'station_names',
+		paint: { "circle-radius": 0 },
+	});
+
+	const previouslyRendered = new Map<StationOffset, { marker: maplibregl.Marker, added: boolean }>();
+	function rerenderChosenLabels(selected: StationLabelProperties[]) {
+		let counts = {
+			fresh: 0,
+			added: 0,
+			removed: 0,
+		};
+
+		const selectedSet = new Set<StationOffset>();
+		for (const label of selected) {
+			if (label.lineCount === 1 && map.getZoom() < 11.5) {
+				// Skip non-transfer stations when not zoomed in.
+				continue;
+			}
+			selectedSet.add(label.index);
+			let previous = previouslyRendered.get(label.index);
+			if (!previous) {
+				const element = document.createElement("div");
+				const word = document.createElement("div");
+				word.className = "train-station-label";
+				word.textContent = label.nameJa;
+				element.appendChild(word);
+				const marker = new maplibregl.Marker({
+					draggable: false,
+					element,
+				}).setLngLat(label);
+
+				previous = {
+					added: false,
+					marker,
+				};
+				previouslyRendered.set(label.index, previous);
+
+				counts.fresh += 1;
+			}
+
+			if (!previous.added) {
+				counts.added += 1;
+				previous.marker.addTo(map);
+				previous.added = true;
+			}
+		}
+
+		for (const [k, v] of previouslyRendered) {
+			if (v.added && !selectedSet.has(k)) {
+				v.marker.remove();
+				v.added = false;
+				counts.removed += 1;
+			}
+		}
+	}
+
+	watchClusters(map, "station_names", {
+		limit: 150,
+		debounceMs: 350,
+	}, clusters => {
+		const selected = [];
+		for (const cluster of clusters as StationLabelProperties[][]) {
+			let best = cluster[0];
+			for (let i = 1; i < cluster.length; i++) {
+				if (cluster[i].lineCount > best.lineCount) {
+					best = cluster[i];
+				} else if (cluster[i].lineCount === best.lineCount) {
+					if (earthGreatCircleDistanceKm(TOKYO_CENTER, best) > earthGreatCircleDistanceKm(TOKYO_CENTER, cluster[i])) {
+						best = cluster[i];
+					}
+				}
+			}
+
+			selected.push(best);
+		}
+
+		rerenderChosenLabels(selected);
 	});
 
 	ReactDOM.createRoot(document.getElementById("root")!).render(

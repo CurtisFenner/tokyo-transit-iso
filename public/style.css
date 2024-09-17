@@ -121,3 +121,13 @@ h5 {
 	padding: 0;
 	margin: 0;
 }
+
+.train-station-label {
+	background: #FFFD;
+	box-shadow: black 0 0 4px -1px;
+	border-radius: 3px;
+	font-size: 9px;
+	font-weight: bold;
+	padding: 0.25em;
+	line-height: 1em;
+}
