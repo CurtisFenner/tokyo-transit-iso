@@ -92,15 +92,12 @@ async function reachableCirclesFrom(
 		maxWalkMinutes: number,
 		maxJourneyMinutes: number,
 	},
-): Promise<WalkingLocus[]> {
-	const circles: WalkingLocus[] = [
-		{
-			coordinate: source,
-			radiusKm: Math.min(options.maxWalkMinutes, options.maxJourneyMinutes)
-				* STANDARD_WALKING_SPEED_KPH / 60,
-			arrivalMinutes: 0,
-		},
-	];
+): Promise<Map<`initial${number}` | StationOffset, WalkingLocus>> {
+	const circles = new Map<`initial${number}` | StationOffset, WalkingLocus>();
+	circles.set("initial0", {
+		coordinate: source,
+		arrivalMinutes: 0,
+	});
 
 	const walkableFromSource = new Map<StationOffset, number>();
 	for (const [stationOffset, matrixStation] of transitData.walkingData.stationCoordinates) {
@@ -111,20 +108,15 @@ async function reachableCirclesFrom(
 		}
 	}
 
-	const reachedList = await findPathsThroughTrains(
+	const reachedList = findPathsThroughTrains(
 		transitData.trainOutEdges,
 		transitData.walkingData.matrix,
 		walkableFromSource,
 	);
 	for (const [stationOffset, path] of reachedList) {
 		if (path.parent !== null && path.edge.via === "train") {
-			const minutesRemainingAfterArrival = Math.max(0, options.maxJourneyMinutes - path.distance);
-			circles.push({
+			circles.set(stationOffset, {
 				coordinate: transitData.walkingData.stationCoordinates.get(stationOffset)!.coordinate,
-				radiusKm: Math.min(
-					options.maxWalkMinutes,
-					minutesRemainingAfterArrival,
-				) * (STANDARD_WALKING_SPEED_KPH / 60),
 				arrivalMinutes: path.distance,
 			});
 		}
@@ -133,9 +125,48 @@ async function reachableCirclesFrom(
 	return circles;
 }
 
+function mergeCircles(circlesBySource: Map<string | StationOffset, WalkingLocus>[]): Map<string | StationOffset, WalkingLocus> {
+	const nonEmpty = circlesBySource.filter(x => x.size !== 0);
+	if (nonEmpty.length === 1) {
+		return nonEmpty[0];
+	} else if (nonEmpty.length === 0) {
+		return new Map();
+	}
+
+	const grouped = new Map<StationOffset, WalkingLocus[]>();
+	for (const circles of circlesBySource) {
+		for (const [ref, circle] of circles) {
+			if (typeof ref !== "string") {
+				grouped.set(ref, grouped.get(ref) || []);
+				grouped.get(ref)!.push(circle);
+			}
+		}
+	}
+
+	const blended = new Map<StationOffset, WalkingLocus>();
+	for (const [ref, group] of grouped) {
+		if (group.length !== nonEmpty.length) {
+			continue;
+		}
+
+		let sumOfSquares = 0;
+		for (const v of group) {
+			sumOfSquares += v.arrivalMinutes ** 2;
+		}
+
+		sumOfSquares /= group.length;
+		const blendedArrivalMinutes = Math.sqrt(sumOfSquares);
+		blended.set(ref, {
+			coordinate: group[0].coordinate,
+			arrivalMinutes: blendedArrivalMinutes,
+		});
+	}
+	return blended;
+}
+
 async function generateInvertedIsoline(
 	transitData: TransitData,
-	source: Coordinate,
+	sources: { coordinate: Coordinate }[],
 	options: {
 		maxWalkMinutes: number,
 		maxJourneyMinutes: number,
@@ -148,8 +179,13 @@ async function generateInvertedIsoline(
 	},
 	properties: {},
 }> {
-	const circles = await reachableCirclesFrom(transitData, source, options);
-	const rings = await timed("isolines", () => isolines(circles, options.maxJourneyMinutes, options));
+	const circlesBySource = await Promise.all(sources.map(source => {
+		return reachableCirclesFrom(transitData, source.coordinate, options);
+	}));
+
+	const circles = mergeCircles(circlesBySource);
+
+	const rings = await timed("isolines", () => isolines([...circles.values()], options.maxJourneyMinutes, options));
 
 	const geojson = geoJSONFromRingForest(
 		groupContainedRings(
@@ -180,7 +216,9 @@ async function main() {
 	const shadelayers = new IsoShadeLayer(map, async (req: { coordinate: Coordinate, options: { maxWalkMinutes: number, maxJourneyMinutes: number } }) => {
 		const iso = await generateInvertedIsoline(
 			await transit30Promise,
-			req.coordinate,
+			[
+				req,
+			],
 			req.options,
 		);
 		return iso;
@@ -256,7 +294,7 @@ async function main() {
 
 		const selectedSet = new Set<StationOffset>();
 		for (const label of selected) {
-			if (label.lineCount === 1 && map.getZoom() < 11.5) {
+			if (label.lineCount === 1 && map.getZoom() < 12) {
 				// Skip non-transfer stations when not zoomed in.
 				continue;
 			}
@@ -265,12 +303,13 @@ async function main() {
 			if (!previous) {
 				const element = document.createElement("div");
 				const word = document.createElement("div");
-				word.className = "train-station-label";
+				word.className = "train-station-label unclickable";
 				word.textContent = label.nameJa;
 				element.appendChild(word);
 				const marker = new maplibregl.Marker({
 					draggable: false,
 					element,
+					className: "unclickable",
 				}).setLngLat(label);
 
 				previous = {

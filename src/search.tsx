@@ -8,7 +8,6 @@ import { LabeledDistanceGraph, dijkstras } from "./graph";
 
 export type WalkingLocus = {
 	coordinate: Coordinate,
-	radiusKm: number,
 	arrivalMinutes: number,
 };
 

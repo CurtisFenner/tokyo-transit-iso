@@ -125,9 +125,14 @@ h5 {
 .train-station-label {
 	background: #FFFD;
 	box-shadow: black 0 0 4px -1px;
-	border-radius: 3px;
-	font-size: 9px;
+	border-radius: 4px;
+	font-size: 12px;
 	font-weight: bold;
 	padding: 0.25em;
 	line-height: 1em;
+}
+
+.unclickable {
+	pointer-events: none;
+	user-select: none;
 }
