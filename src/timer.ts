@@ -35,3 +35,51 @@ export function printTimeTree(tree: TimeTree = rootTimeTree, label: string = "[r
 		}),
 	];
 }
+
+export function sleep(ms: number): Promise<number> {
+	const before = performance.now();
+	return new Promise(resolve => {
+		setTimeout(() => {
+			const after = performance.now();
+			resolve(after - before);
+		}, ms);
+	});
+}
+
+export class Timeline {
+	private data = new Map<symbol, {
+		message: string,
+		startMs: number,
+		endMs: null | number,
+		endMessage: null | string,
+	}>();
+
+	start(message: string, startMs = performance.now()): symbol {
+		const x = Symbol("stopwatch");
+		this.data.set(x, {
+			message,
+			startMs,
+			endMs: null,
+			endMessage: null,
+		});
+		return x;
+	}
+
+	finish(x: symbol, endMessage: null | string): void {
+		const y = this.data.get(x);
+		if (!y) throw new Error("unknown symbol");
+		if (y.endMs) throw new Error("already finished");
+
+		y.endMs = performance.now();
+		y.endMessage = endMessage;
+	}
+
+	entries(): {
+		message: string,
+		startMs: number,
+		endMs: null | number,
+		endMessage: null | string,
+	}[] {
+		return [... this.data.values()].map(x => ({ ...x }));
+	}
+}

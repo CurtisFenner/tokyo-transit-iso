@@ -248,10 +248,19 @@ export function PlaceEntryLine(props: PlaceEntryLineProps) {
 				value={data.maxMinutes}
 				onInput={e => { updateData({ maxMinutes: parseFloat(e.currentTarget.value) }); }}>
 				<option value={15}>15 minutes</option>
+				<option value={20}>20 minutes</option>
+				<option value={25}>25 minutes</option>
 				<option value={30}>30 minutes</option>
+				<option value={35}>35 minutes</option>
+				<option value={40}>40 minutes</option>
 				<option value={45}>45 minutes</option>
+				<option value={50}>50 minutes</option>
+				<option value={55}>55 minutes</option>
 				<option value={60}>60 minutes</option>
+				<option value={65}>65 minutes</option>
+				<option value={70}>70 minutes</option>
 				<option value={75}>75 minutes</option>
+				<option value={80}>80 minutes</option>
 				<option value={90}>90 minutes</option>
 				<option value={120}>2 hours</option>
 				<option value={180}>3 hours</option>

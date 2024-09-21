@@ -35,6 +35,8 @@ export type TransitData = {
 	trainOutEdges: MatrixDistance[][],
 	walkingData: WalkingData,
 	wikidata: Wikidata,
+	stations: MatrixStation[],
+	lines: MatrixLine[],
 };
 
 export async function loadTransitData(
@@ -63,9 +65,7 @@ export async function loadTransitData(
 			new Map(matrices.stations.map((x, i) => [i, x])),
 		),
 		wikidata,
+		stations: matrices.stations,
+		lines: matrices.lines,
 	};
 }
-
-export const transit30Promise = loadTransitData({
-	maxWalkMinutes: 30,
-});

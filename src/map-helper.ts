@@ -64,6 +64,8 @@ export function watchClusters(
 
 	markStale();
 
+	map.once("idle", () => markStale());
+
 	map.on("zoomstart", markStale);
 	map.on("zoom", markStale);
 	map.on("zoomend", markStale);

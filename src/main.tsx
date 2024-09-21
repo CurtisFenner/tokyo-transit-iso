@@ -1,27 +1,17 @@
 import * as maplibregl from "maplibre-gl";
 import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
 import { STANDARD_WALKING_SPEED_KPH, earthGreatCircleDistanceKm } from "./geometry";
-import { printTimeTree, timed } from "./timer";
+import { printTimeTree, timed, Timeline } from "./timer";
 import * as nomin from "./nomin";
 import ReactDOM from "react-dom/client";
 import React from "react";
 import { PlaceList, Waiting } from "./components/place-list";
 import { StationOffset, WalkingLocus, findPathsThroughTrains, isolines, loadMatrices } from "./search";
 import { geoJSONFromRingForest, groupContainedRings } from "./spatial";
-import { transit30Promise, TransitData } from "./transit-data";
+import { loadTransitData, TransitData } from "./transit-data";
 import { IsoShadeLayer } from "./components/isoshadelayer";
 import { watchClusters } from "./map-helper";
-
-
-function sleep(ms: number): Promise<number> {
-	const before = performance.now();
-	return new Promise(resolve => {
-		setTimeout(() => {
-			const after = performance.now();
-			resolve(after - before);
-		}, ms);
-	});
-}
+import { ClusteredLabels } from "./components/ClusteredLabels";
 
 const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
 	Object.freeze({
@@ -34,10 +24,10 @@ const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }]
 	}),
 ];
 
-const TOKYO_CENTER = {
+const TOKYO_CENTER = Object.freeze({
 	lat: (TOKYO_BOUNDS[0].lat + TOKYO_BOUNDS[1].lat) / 2,
 	lon: (TOKYO_BOUNDS[0].lng + TOKYO_BOUNDS[1].lng) / 2,
-};
+});
 
 const TOKYO_BOUNDS_MARGIN: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
 	Object.freeze({
@@ -58,8 +48,7 @@ const map = new maplibregl.Map({
 	attributionControl: false,
 	maxBounds: TOKYO_BOUNDS,
 	maxZoom: 17,
-});
-map.addControl(new maplibregl.AttributionControl(), "bottom-left");
+}).addControl(new maplibregl.AttributionControl(), "bottom-left");
 
 map.touchZoomRotate.disableRotation();
 map.keyboard.disableRotation();
@@ -205,17 +194,26 @@ async function generateInvertedIsoline(
 	return geojson;
 }
 
-
 async function main() {
+	const loadTimeline = new Timeline();
+	const mapLoad = loadTimeline.start("load map");
+	const transitDataLoad = loadTimeline.start("load transit data");
+
+	const transit30Promise = loadTransitData({ maxWalkMinutes: 60 });
+
 	await new Promise(resolve => {
 		map.on("load", () => {
+			loadTimeline.finish(mapLoad, null);
 			resolve(0);
-		})
+		});
 	});
+
+	const transitData = await transit30Promise;
+	loadTimeline.finish(transitDataLoad, null);
 
 	const shadelayers = new IsoShadeLayer(map, async (req: { coordinate: Coordinate, options: { maxWalkMinutes: number, maxJourneyMinutes: number } }) => {
 		const iso = await generateInvertedIsoline(
-			await transit30Promise,
+			transitData,
 			[
 				req,
 			],
@@ -224,166 +222,60 @@ async function main() {
 		return iso;
 	});
 
-	const stationLabelsFeatures: {
-		type: "FeatureCollection",
-		features: {
-			type: "Feature",
-			properties: object,
-			geometry: {
-				type: "Point",
-				coordinates: [number, number],
-			},
-		}[],
-	} = {
-		type: "FeatureCollection",
-		features: [],
-	};
+	new ClusteredLabels(map,
+		transitData.stations.map((station, stationIndex) => {
+			const lines = transitData.lines.filter(line => {
+				return line.stops.includes(stationIndex);
+			}).length;
+			const terminus = transitData.lines.filter(line => {
+				return line.stops[0] === stationIndex || line.stops[line.stops.length - 1] === stationIndex;
+			}).length;
 
-	type StationLabelProperties = {
-		nameJa: string,
-		lineCount: number,
-		lat: number,
-		lon: number,
-		index: number,
-	};
-
-	const matrices = await loadMatrices();
-	for (let stationIndex = 0; stationIndex < matrices.stations.length; stationIndex++) {
-		const matrixStation = matrices.stations[stationIndex];
-		const nameJa = cleanStationName(matrixStation.name);
-		const coordinate = matrixStation.coordinate;
-		const lineCount = matrices.lines.filter(x => x.stops.includes(stationIndex)).length;
-
-		stationLabelsFeatures.features.push({
-			type: "Feature",
-			properties: {
-				nameJa,
-				lineCount,
-				lat: coordinate.lat,
-				lon: coordinate.lon,
-				index: stationIndex,
-			} satisfies StationLabelProperties,
-			geometry: {
-				type: "Point",
-				coordinates: [coordinate.lon, coordinate.lat],
-			},
-		});
-	}
-
-	map.addSource("station_names", {
-		type: "geojson",
-		data: stationLabelsFeatures,
-		cluster: true,
-		clusterRadius: 35,
-	});
-
-	map.addLayer({
-		'id': 'earthquake_circle_true',
-		'type': 'circle',
-		'source': 'station_names',
-		paint: { "circle-radius": 0 },
-	});
-
-	const previouslyRendered = new Map<StationOffset, { marker: maplibregl.Marker, added: boolean }>();
-	function rerenderChosenLabels(selected: StationLabelProperties[]) {
-		let counts = {
-			fresh: 0,
-			added: 0,
-			removed: 0,
-		};
-
-		const selectedSet = new Set<StationOffset>();
-		for (const label of selected) {
-			if (label.lineCount === 1 && map.getZoom() < 12) {
-				// Skip non-transfer stations when not zoomed in.
-				continue;
-			}
-			selectedSet.add(label.index);
-			let previous = previouslyRendered.get(label.index);
-			if (!previous) {
+			const priority = lines + terminus * 0.1;
+			return {
+				data: { ...station, lines, terminus, priority },
+				priority,
+				minZoom: (lines <= 1 && terminus === 0)
+					? 13
+					: (lines + terminus * 0.55 <= 2
+						? 10.6
+						: 0),
+				coordinate: station.coordinate,
+			};
+		}),
+		{
+			clusterRadius: 35,
+			makeMarker(d: MatrixStation): maplibregl.Marker {
 				const element = document.createElement("div");
 				const word = document.createElement("div");
 				word.className = "train-station-label unclickable";
-				word.textContent = label.nameJa;
+				word.textContent = cleanStationName(d.name);
 				element.appendChild(word);
-				const marker = new maplibregl.Marker({
+				return new maplibregl.Marker({
 					draggable: false,
 					element,
 					className: "unclickable",
-				}).setLngLat(label);
-
-				previous = {
-					added: false,
-					marker,
-				};
-				previouslyRendered.set(label.index, previous);
-
-				counts.fresh += 1;
-			}
-
-			if (!previous.added) {
-				counts.added += 1;
-				previous.marker.addTo(map);
-				previous.added = true;
-			}
-		}
-
-		for (const [k, v] of previouslyRendered) {
-			if (v.added && !selectedSet.has(k)) {
-				v.marker.remove();
-				v.added = false;
-				counts.removed += 1;
-			}
-		}
-	}
-
-	watchClusters(map, "station_names", {
-		limit: 150,
-		debounceMs: 350,
-	}, clusters => {
-		const selected = [];
-		for (const cluster of clusters as StationLabelProperties[][]) {
-			let best = cluster[0];
-			for (let i = 1; i < cluster.length; i++) {
-				if (cluster[i].lineCount > best.lineCount) {
-					best = cluster[i];
-				} else if (cluster[i].lineCount === best.lineCount) {
-					if (earthGreatCircleDistanceKm(TOKYO_CENTER, best) > earthGreatCircleDistanceKm(TOKYO_CENTER, cluster[i])) {
-						best = cluster[i];
-					}
-				}
-			}
-
-			selected.push(best);
-		}
-
-		rerenderChosenLabels(selected);
-	});
+				});
+			},
+		});
 
 	ReactDOM.createRoot(document.getElementById("root")!).render(
 		<React.StrictMode>
-			<Waiting
-				promise={transit30Promise}
-				waiting=<i>Loading transit data...</i>
-				failed={e => <></>}>
-				{transitData => {
-					return <>
-						<PlaceList
-							isoshade={shadelayers}
-							transitData={transitData}
-							initial={[
-								{
-									name: "Hachiko",
-									maxMinutes: 60,
-									coordinate: HACHIKO_COORDINATES,
-								}
-							]}
-						/>
-					</>;
-				}}
-			</Waiting>
+			<PlaceList
+				isoshade={shadelayers}
+				transitData={transitData}
+				initial={[
+					{
+						name: "Hachiko",
+						maxMinutes: 60,
+						coordinate: HACHIKO_COORDINATES,
+					}
+				]}
+			/>
 		</React.StrictMode>
 	);
+
+	console.log(loadTimeline.entries());
 }
 
 main();

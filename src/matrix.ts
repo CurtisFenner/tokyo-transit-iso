@@ -1,4 +1,4 @@
-type Coordinate = { lat: number, lon: number };
+type Coordinate = { readonly lat: number, readonly lon: number };
 
 type TrainLabel = {
 	departing: number,
