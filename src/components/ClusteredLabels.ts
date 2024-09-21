@@ -9,6 +9,8 @@ export class ClusteredLabels<T> {
 	}[];
 	private markers: maplibregl.Marker[];
 
+	private nullMarker: maplibregl.Marker;
+
 	constructor(
 		map: maplibregl.Map,
 		data: {
@@ -72,11 +74,14 @@ export class ClusteredLabels<T> {
 		this.markers = this.data.map(datum => {
 			const marker = options.makeMarker(datum.data)
 				.setLngLat(datum.coordinate);
-			// marker.addClassName("display-none");
 			marker.addTo(map);
 			marker.remove();
 			return marker;
 		});
+
+		this.nullMarker = new maplibregl.Marker({
+			opacity: "0%",
+		}).setLngLat([0, 0]).addTo(map);
 
 		let previouslyDisplayedMarkers = new Set<maplibregl.Marker>();
 
@@ -103,6 +108,12 @@ export class ClusteredLabels<T> {
 			for (const x of displayedMarkers) {
 				if (!previouslyDisplayedMarkers.has(x)) {
 					x.addTo(map);
+					const line = this.nullMarker.getElement();
+					const element = x.getElement();
+					if (element.parentElement !== line.parentElement) {
+						console.warn("unexpected parenting");
+					}
+					element.parentElement?.insertBefore(element, line);
 				}
 			}
 
