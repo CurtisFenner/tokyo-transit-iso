@@ -1,109 +1,76 @@
-export type MultiPolygonGeojsonData = {
-	type: "Feature",
-	geometry: {
-		type: "MultiPolygon",
-		coordinates: [number, number][][][],
-	},
-	properties: Record<string, number>,
-};
-
-export class IsoShadeLayer<T> {
-	private dataset = new Map<string, MultiPolygonGeojsonData>();
+export class GeojsonSourcesManager<T> {
+	private dataset = new Map<string, GeoJSON.GeoJSON>();
 	constructor(
 		public map: maplibregl.Map,
-		public generator: (t: T) => Promise<MultiPolygonGeojsonData>,
+		public generator: (t: T) => Promise<GeoJSON.Feature>,
 	) {
 	}
 
-	createShadeLayer(id: string) {
+	createSource(
+		id: string,
+		geometryType: "MultiPolygon" | "MultiLineString" = "MultiPolygon",
+		options: { maxzoom?: number } = {},
+	): string {
 		const sourceID = `isoline-source-${id}`;
-		const blank: MultiPolygonGeojsonData = {
+		const blank: GeoJSON.GeoJSON = {
 			type: "Feature",
-			geometry: {
-				type: "MultiPolygon",
+			geometry: geometryType === "MultiPolygon" ? {
+				type: geometryType,
+				coordinates: [],
+			} : {
+				type: geometryType,
 				coordinates: [],
 			},
-			properties: { "fill-opacity-prop": 0.9 },
+			properties: {},
 		};
 		this.dataset.set(id, blank);
+
 		this.map.addSource(sourceID, {
 			type: "geojson",
 			lineMetrics: true,
 			data: blank,
+			...options.maxzoom !== undefined ? { maxzoom: options.maxzoom } : {},
 		});
-		this.map.addLayer({
-			id: `isolines-fill-${id}`,
-			type: "fill",
-			source: sourceID,
-			paint: {
-				"fill-color": "gray",
-				"fill-opacity": ["get", "fill-opacity-prop"],
-			},
-		});
-		this.map.addLayer({
-			id: `isolines-line-${id}`,
-			type: "line",
-			source: sourceID,
-			paint: {
-				"line-color": "black",
-				"line-width": 3,
-			},
-		});
+		return sourceID;
 	}
 
-	updateShadeGeometry(
+	private updateSourceGeometry(
 		id: string,
-		data: MultiPolygonGeojsonData,
+		data: GeoJSON.Feature,
 	) {
 		if (!this.dataset.has(id)) {
-			this.createShadeLayer(id);
+			throw new Error("id `" + id + "` not defined");
 		}
-		this.dataset.set(id, data);
-		this.refresh();
+		this.dataset.set(id, data.geometry);
+		const sourceID = `isoline-source-${id}`;
+		const source = this.map.getSource(sourceID) as maplibregl.GeoJSONSource;
+		source.setData(data);
 	}
 
-	async updateShadeSource(id: string, t: T) {
+	async recalculateSourceGeometry(id: string, t: T) {
 		const lease = this.dataset.get(id);
 		if (!lease) {
-			this.createShadeLayer(id);
-			this.updateShadeSource(id, t);
-			return;
+			throw new Error("id `" + id + "` not defined");
 		}
 
 		const newGeoJSON = await this.generator(t);
 
 		if (this.dataset.get(id) === lease) {
-			this.updateShadeGeometry(id, newGeoJSON);
+			this.updateSourceGeometry(id, newGeoJSON);
+			this.sourceRefreshed(id, newGeoJSON, t);
 		}
 	}
 
-	deleteShadeLayer(id: string) {
+	deleteSource(id: string) {
 		if (!this.dataset.has(id)) {
-			return;
+			throw new Error("id `" + id + "` not defined");
 		}
 		this.dataset.delete(id);
 		this.map.removeLayer(`isolines-fill-${id}`);
 		this.map.removeLayer(`isolines-line-${id}`);
 		this.map.removeSource(`isoline-source-${id}`);
-		this.refresh();
 	}
 
-	refresh(): void {
-		const COMBINED_OPACITY = 0.705;
-		const COMBINED_TRANSPARENCY = 1 - COMBINED_OPACITY;
-		const layerTransparency = Math.pow(COMBINED_TRANSPARENCY, 1 / Math.max(1, this.dataset.size));
-		const layerOpacity = 1 - layerTransparency;
-
-		for (const [clientSourceID, data] of this.dataset) {
-			const sourceID = `isoline-source-${clientSourceID}`;
-			const source = this.map.getSource(sourceID) as maplibregl.GeoJSONSource;
-			source.setData({
-				...data,
-				properties: {
-					...data.properties,
-					"fill-opacity-prop": layerOpacity,
-				},
-			});
-		}
+	protected sourceRefreshed(id: string, data: Readonly<GeoJSON.Feature>, t: T): void {
 	}
 }

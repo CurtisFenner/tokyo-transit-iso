@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import { TransitData } from "../transit-data";
 import * as maplibregl from "maplibre-gl";
 import { HACHIKO_COORDINATES } from "../matchstations";
-import { IsoShadeLayer } from "./isoshadelayer";
+import { GeojsonSourcesManager } from "./isoshadelayer";
 
 export type PlaceEntry = {
 	name: string,
@@ -43,14 +43,14 @@ export type PlaceListProps = {
 	initial: PlaceEntry[],
 	transitData: TransitData,
 	onChange?: (entries: PlaceEntry) => void,
-	isoshade: IsoShadeLayer<{
+	isoshade: GeojsonSourcesManager<{
 		coordinate: Coordinate,
 		options: { maxWalkMinutes: number, maxJourneyMinutes: number },
 	}>,
 };
 
 function rerenderEntry(
-	isoshade: IsoShadeLayer<{
+	isoshade: GeojsonSourcesManager<{
 		coordinate: Coordinate,
 		options: { maxWalkMinutes: number, maxJourneyMinutes: number },
 	}>,
@@ -61,7 +61,7 @@ function rerenderEntry(
 	},
 	options: { maxWalkMinutes: number },
 ) {
-	isoshade.updateShadeSource(entry.id, {
+	isoshade.recalculateSourceGeometry(entry.id, {
 		coordinate: entry.coordinate,
 		options: {
 			maxJourneyMinutes: entry.maxMinutes,
@@ -96,13 +96,13 @@ export function PlaceList(props: PlaceListProps) {
 
 	const dropEntry = (id: string) => {
 		updateEntries(old => {
-			props.isoshade.deleteShadeLayer(id);
+			props.isoshade.deleteSource(id);
 			return old.filter(x => x.id !== id);
 		});
 	};
 
 	useMapEffect(new Map(entries.map(e => [e.id, e])), (_, entry) => {
-		props.isoshade.updateShadeSource(entry.id, {
+		props.isoshade.recalculateSourceGeometry(entry.id, {
 			coordinate: entry.coordinate,
 			options: {
 				maxJourneyMinutes: entry.maxMinutes,

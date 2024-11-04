@@ -1,17 +1,12 @@
 import * as maplibregl from "maplibre-gl";
-import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
-import { STANDARD_WALKING_SPEED_KPH, earthGreatCircleDistanceKm } from "./geometry";
-import { printTimeTree, timed, Timeline } from "./timer";
-import * as nomin from "./nomin";
-import ReactDOM from "react-dom/client";
-import React from "react";
-import { PlaceList, Waiting } from "./components/place-list";
-import { StationOffset, WalkingLocus, findPathsThroughTrains, isolines, loadMatrices } from "./search";
-import { geoJSONFromRingForest, groupContainedRings } from "./spatial";
-import { loadTransitData, TransitData } from "./transit-data";
-import { IsoShadeLayer } from "./components/isoshadelayer";
-import { watchClusters } from "./map-helper";
 import { ClusteredLabels } from "./components/ClusteredLabels";
+import { GeojsonSourcesManager } from "./components/isoshadelayer";
+import { earthGreatCircleDistanceKm, simplifyPath, STANDARD_WALKING_SPEED_KPH } from "./geometry";
+import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
+import { findPathsThroughTrains, isolines, StationOffset, WalkingLocus } from "./search";
+import { geoJSONFromRingForest, groupContainedRings } from "./spatial";
+import * as timer from "./timer";
+import { loadTransitData, TransitData } from "./transit-data";
 
 const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
 	Object.freeze({
@@ -174,7 +169,7 @@ async function generateInvertedIsoline(
 
 	const circles = mergeCircles(circlesBySource);
 
-	const rings = await timed("isolines", () => isolines([...circles.values()], options.maxJourneyMinutes, options));
+	const rings = await timer.timed("isolines", () => isolines([...circles.values()], options.maxJourneyMinutes, options));
 
 	const geojson = geoJSONFromRingForest(
 		groupContainedRings(
@@ -195,7 +190,7 @@ async function generateInvertedIsoline(
 }
 
 async function main() {
-	const loadTimeline = new Timeline();
+	const loadTimeline = new timer.Timeline();
 	const mapLoad = loadTimeline.start("load map");
 	const transitDataLoad = loadTimeline.start("load transit data");
 
@@ -211,17 +206,7 @@ async function main() {
 	const transitData = await transit30Promise;
 	loadTimeline.finish(transitDataLoad, null);
 
-	const shadelayers = new IsoShadeLayer(map, async (req: { coordinate: Coordinate, options: { maxWalkMinutes: number, maxJourneyMinutes: number } }) => {
-		const iso = await generateInvertedIsoline(
-			transitData,
-			[
-				req,
-			],
-			req.options,
-		);
-		return iso;
-	});
-
+	// Create labels for each train station.
 	new ClusteredLabels(map,
 		transitData.stations.map((station, stationIndex) => {
 			const lines = transitData.lines.filter(line => {
@@ -259,21 +244,167 @@ async function main() {
 			},
 		});
 
-	ReactDOM.createRoot(document.getElementById("root")!).render(
-		<React.StrictMode>
-			<PlaceList
-				isoshade={shadelayers}
-				transitData={transitData}
-				initial={[
-					{
-						name: "Hachiko",
-						maxMinutes: 60,
-						coordinate: HACHIKO_COORDINATES,
-					}
-				]}
-			/>
-		</React.StrictMode>
-	);
+	const shadelayers = new class Foo extends GeojsonSourcesManager<{ coordinate: Coordinate, options: { maxWalkMinutes: number, maxJourneyMinutes: number } }> {
+		constructor() {
+			super(map, async (req: { coordinate: Coordinate, options: { maxWalkMinutes: number, maxJourneyMinutes: number } }) => {
+				const iso = await generateInvertedIsoline(
+					transitData,
+					[
+						req,
+					],
+					req.options,
+				);
+				return iso;
+			});
+		}
+	};
+
+	const labelLayers = new GeojsonSourcesManager(map, async (req: { labelText: string, zoom: number, polygons: Coordinate[][] }) => {
+		const out = [];
+		for (const polygon of req.polygons) {
+			const simplified = simplifyPath(polygon, { zoom: req.zoom, stepTiles: 0.15 });
+			if (simplified.length >= 3) {
+				out.push(simplified);
+			}
+		}
+
+		const exploded: [lon: number, lat: number][][] = [];
+		for (const polygon of out) {
+			const stride = 7;
+			for (let i = 0; i + stride <= polygon.length || i === 0; i += stride) {
+				const section = polygon.slice(i, i + stride + 1);
+				exploded.push(
+					section.map(c => [c.lon, c.lat] as [lon: number, lat: number]),
+				);
+			}
+		}
+
+		return {
+			type: "Feature",
+			geometry: {
+				type: "MultiLineString",
+				coordinates: exploded,
+			},
+			properties: {
+				labelText: req.labelText,
+			},
+		} satisfies GeoJSON.Feature;
+	});
+
+	const isolineValues = [30, 40, 50];
+
+	const isolines = new Map(isolineValues.map(isolineValue => {
+		const key = "iso-" + isolineValue;
+		return [
+			isolineValue,
+			{
+				minutes: isolineValue,
+				key,
+				sourceID: shadelayers.createSource(key),
+			},
+		];
+	}));
+
+	const isoSourceIDBasic = shadelayers.createSource("basic");
+
+	map.addLayer({
+		id: Math.random().toString(),
+		type: "fill",
+		source: isoSourceIDBasic,
+		paint: {
+			"fill-color": "gray",
+			"fill-opacity": 0.9,
+		},
+	});
+
+	map.addLayer({
+		id: Math.random().toString(),
+		type: "line",
+		source: isoSourceIDBasic,
+		layout: {
+			"line-cap": "round",
+			"line-join": "round",
+		},
+		paint: {
+			"line-color": "black",
+			"line-width": 3,
+		},
+	});
+
+	map.addLayer({
+		id: Math.random().toString(),
+		type: "line",
+		source: isoSourceIDBasic,
+		paint: {
+			"line-color": "black",
+			"line-width": 8,
+			"line-blur": 8,
+			"line-offset": -2,
+		},
+	});
+
+	for (const [_, v] of isolines) {
+		map.addLayer({
+			id: v.key + "-line",
+			type: "line",
+			source: v.sourceID,
+			layout: {
+				"line-cap": "round",
+				"line-join": "round",
+			},
+			paint: {
+				"line-color": "black",
+				"line-width": 1.5,
+				"line-opacity": 0.35,
+				"line-dasharray": [2, 3],
+			},
+		});
+
+		map.addLayer({
+			id: v.key + "-inset-blur",
+			type: "line",
+			source: v.sourceID,
+			paint: {
+				"line-color": "black",
+				"line-width": 8,
+				"line-blur": 8,
+				"line-offset": -2,
+				"line-opacity": 0.25,
+			},
+		});
+	}
+
+	function rerenderIsolines(coordinate: Coordinate) {
+		shadelayers.recalculateSourceGeometry("basic", {
+			coordinate,
+			options: {
+				maxJourneyMinutes: 60,
+				maxWalkMinutes: 25,
+			},
+		});
+		for (const [k, v] of isolines) {
+			shadelayers.recalculateSourceGeometry(v.key, {
+				coordinate,
+				options: {
+					maxJourneyMinutes: k,
+					maxWalkMinutes: 25,
+				},
+			});
+		}
+	}
+
+	const marker = new maplibregl.Marker({ draggable: true })
+		.setLngLat(HACHIKO_COORDINATES)
+		.addTo(map);
+
+	marker.on("dragend", async () => {
+		const selected = marker.getLngLat();
+		const newCoordinate = { lat: selected.lat, lon: selected.lng };
+
+		rerenderIsolines(newCoordinate);
+		console.log("Current zoom:", map.getZoom());
+	});
+	rerenderIsolines(HACHIKO_COORDINATES);
 
 	console.log(loadTimeline.entries());
 }
