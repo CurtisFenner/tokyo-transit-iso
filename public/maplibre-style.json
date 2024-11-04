@@ -1,6 +1,7 @@
 {
   "version": 8,
   "name": "Positron",
+  "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
   "metadata": {
     "mapbox:autocomposite": false,
     "mapbox:type": "template",
@@ -24,7 +25,7 @@
   "sources": {
     "openmaptiles": {
       "type": "vector",
-      "url": "https://api.maptiler.com/tiles/v3/tiles.json?key=1SSc0STgkaNvnXaSkCIT"
+      "url": "https://tiles.openfreemap.org/planet"
     }
   },
   "sprite": "https://openmaptiles.github.io/positron-gl-style/sprite",
