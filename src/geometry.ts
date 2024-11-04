@@ -208,3 +208,102 @@ export function geoMidpoint(a: Coordinate, b: Coordinate) {
 		lon: (a.lon + b.lon) / 2,
 	};
 }
+
+export function toTile(coordinate: Coordinate, options: { zoom: number }): { x: number, y: number } {
+	const x3857 = coordinate.lon;
+	const y3857 = Math.asinh(Math.tan(coordinate.lat * (Math.PI / 180)));
+
+	// Y = asinh( tan( x * pi / 180 ))
+
+	const x = 0.5 + x3857 / 360;
+	const y = 0.5 + y3857 / (-2 * Math.PI);
+
+	const n = 2 ** options.zoom;
+	return {
+		x: n * x,
+		y: n * y,
+	};
+}
+
+export function fromTile(xy: { x: number, y: number }, options: { zoom: number }): Coordinate {
+	const n = 2 ** options.zoom;
+	const x = xy.x / n;
+	const y = xy.y / n;
+
+	const x3857 = (x - 0.5) * 360;
+	const y3857 = (y - 0.5) * (-2 * Math.PI);
+
+	return {
+		lon: x3857,
+		lat: Math.atan(Math.sinh(y3857)) * (180 / Math.PI),
+	};
+}
+
+export function simplifyPath(path: Coordinate[], options: { zoom: number, stepTiles: number }): Coordinate[] {
+	const xys = path.map(c => toTile(c, options));
+	const simplified = simplifyXYPath(xys, options.stepTiles);
+	return simplified.map(s => fromTile(s, options));
+}
+
+export function xyDistance(a: { x: number, y: number }, b: { x: number, y: number }): number {
+	const dx = a.x - b.x;
+	const dy = a.y - b.y;
+	return Math.sqrt(dx * dx + dy * dy);
+}
+
+export function simplifyXYPath(path: { x: number, y: number }[], stepSize: number): { x: number, y: number }[] {
+	let sampleFrequency = stepSize / 5;
+	const samples = [
+		{ x: path[0].x, y: path[0].y, d: 0 },
+	];
+	let dFrom = 0;
+	for (let i = 0; i + 1 < path.length; i++) {
+		const from = path[i];
+		const to = path[i + 1];
+		const dx = to.x - from.x;
+		const dy = to.y - from.y;
+		const dm = Math.sqrt(dx ** 2 + dy ** 2);
+		if (dm <= 1e-6) {
+			dFrom += dm;
+			continue;
+		}
+
+		let fromMyLine = 0;
+		for (let d = samples[samples.length - 1].d + sampleFrequency; d <= dFrom + dm; d += sampleFrequency) {
+			while (d < dFrom) {
+				d += sampleFrequency;
+			}
+
+			const du = d - dFrom;
+			const candidate = {
+				x: from.x + dx * du / dm,
+				y: from.y + dy * du / dm,
+				d,
+			};
+			if (xyDistance(candidate, samples[samples.length - 1]) >= stepSize) {
+				if (fromMyLine >= 2) {
+					samples.pop();
+					fromMyLine -= 1;
+				}
+				samples.push(candidate);
+				fromMyLine += 1;
+			}
+		}
+
+		dFrom += dm;
+	}
+
+	const last = path[path.length - 1];
+	while (samples.length > 0) {
+		const top = samples[samples.length - 1];
+		const dx = top.x - last.x;
+		const dy = top.y - last.y;
+		const dm = Math.sqrt(dx ** 2 + dy ** 2);
+		if (dm >= stepSize) {
+			break;
+		}
+		samples.pop();
+	}
+
+	return [...samples.map(v => ({ x: v.x, y: v.y })), last];
+}
