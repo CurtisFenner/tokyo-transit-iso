@@ -1,6 +1,6 @@
 import * as maplibregl from "maplibre-gl";
 import { ClusteredLabels } from "./components/ClusteredLabels";
-import { GeojsonSourcesManager } from "./components/isoshadelayer";
+import { GeojsonSourcesManager } from "./components/GeojsonSourcesManager";
 import { earthGreatCircleDistanceKm, simplifyPath, STANDARD_WALKING_SPEED_KPH } from "./geometry";
 import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
 import { findPathsThroughTrains, isolines, StationOffset, WalkingLocus } from "./search";
