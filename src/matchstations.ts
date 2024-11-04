@@ -1,4 +1,4 @@
-import * as spatial from "./spatial";
+import * as spatial from "./data/spatial";
 
 type WikidataRow = {
 	line: string,

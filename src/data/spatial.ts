@@ -1,4 +1,4 @@
-import { earthGreatCircleDistanceKm } from "./geometry";
+import { earthGreatCircleDistanceKm } from "../geometry";
 
 export function toTile(zoom: number, coordinate: Coordinate): {
 	x: number, y: number,

@@ -1,5 +1,5 @@
 import * as maplibregl from "maplibre-gl";
-import { watchClusters } from "../map-helper";
+import { watchClusters } from "../data/map-helper";
 
 export class ClusteredLabels<T> {
 	private data: {

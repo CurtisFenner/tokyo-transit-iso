@@ -4,8 +4,8 @@ import { GeojsonSourcesManager } from "./components/GeojsonSourcesManager";
 import { earthGreatCircleDistanceKm, simplifyPath, STANDARD_WALKING_SPEED_KPH } from "./geometry";
 import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
 import { findPathsThroughTrains, isolines, StationOffset, WalkingLocus } from "./search";
-import { geoJSONFromRingForest, groupContainedRings } from "./spatial";
-import * as timer from "./timer";
+import { geoJSONFromRingForest, groupContainedRings } from "./data/spatial";
+import * as timer from "./data/timer";
 import { loadTransitData, TransitData } from "./transit-data";
 
 const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }] = [

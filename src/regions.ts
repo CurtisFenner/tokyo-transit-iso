@@ -1,7 +1,7 @@
 import { LocalCoordinate, LocalPlane, earthGreatCircleDistanceKm, geoMidpoint } from "./geometry";
-import { SimpleGraph, components } from "./graph";
+import { SimpleGraph, components } from "./data/graph";
 import { HACHIKO_COORDINATES } from "./matchstations";
-import * as spatial from "./spatial";
+import * as spatial from "./data/spatial";
 
 export type Arrival = {
 	coordinate: Coordinate,

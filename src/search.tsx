@@ -1,10 +1,10 @@
 import * as maplibregl from "maplibre-gl";
 import * as images from "./images";
-import * as spatial from "./spatial";
+import * as spatial from "./data/spatial";
 import { STANDARD_WALKING_SPEED_KPH, earthGreatCircleDistanceKm } from "./geometry";
-import { timed } from "./timer";
+import { timed } from "./data/timer";
 import { assignTiles, groupAndOutlineTiles } from "./regions";
-import { LabeledDistanceGraph, dijkstras } from "./graph";
+import { LabeledDistanceGraph, dijkstras } from "./data/graph";
 
 export type WalkingLocus = {
 	coordinate: Coordinate,
