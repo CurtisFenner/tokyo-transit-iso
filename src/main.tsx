@@ -83,7 +83,7 @@ async function generateInvertedIsoline(
 	type: "Feature",
 	geometry: {
 		type: "MultiPolygon",
-		coordinates: [number, number][][][],
+		coordinates: [lon: number, lat: number][][][],
 	},
 	properties: {},
 }> {
@@ -192,14 +192,7 @@ async function main() {
 	const shadelayers = new class Foo extends GeojsonSourcesManager<{ coordinate: Coordinate, options: { maxWalkMinutes: number, maxJourneyMinutes: number } }> {
 		constructor() {
 			super(map, async (req: { coordinate: Coordinate, options: { maxWalkMinutes: number, maxJourneyMinutes: number } }) => {
-				const iso = await generateInvertedIsoline(
-					transitData,
-					[
-						req,
-					],
-					req.options,
-				);
-				return iso;
+				return await generateInvertedIsoline(transitData, [req], req.options,);
 			});
 		}
 	};

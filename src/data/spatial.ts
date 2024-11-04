@@ -115,7 +115,7 @@ export function groupContainedRings(polygons: Coordinate[][]): RingTree[] {
 	return stack[0].children;
 }
 
-function toGeoJSONCoordinateLoop(polygon: Coordinate[], sign: number): [number, number][] {
+function toGeoJSONCoordinateLoop(polygon: Coordinate[], sign: number): [lon: number, lat: number][] {
 	const array: [number, number][] = [...polygon, polygon[0]]
 		.map(p => [p.lon, p.lat]);
 	if (sign < 0) {
