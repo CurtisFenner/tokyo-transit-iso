@@ -1,11 +1,12 @@
 import * as maplibregl from "maplibre-gl";
 import { ClusteredLabels } from "./components/ClusteredLabels";
 import { GeojsonSourcesManager } from "./components/GeojsonSourcesManager";
-import { earthGreatCircleDistanceKm, simplifyPath, STANDARD_WALKING_SPEED_KPH } from "./geometry";
-import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
-import { findPathsThroughTrains, isolines, StationOffset, WalkingLocus } from "./search";
+import { zipKeyedMapsTotal } from "./data/data";
 import { geoJSONFromRingForest, groupContainedRings } from "./data/spatial";
 import * as timer from "./data/timer";
+import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
+import { blendArrivals, Pathfinder } from "./pathfinding";
+import { ArrivalTime, isolines } from "./search";
 import { loadTransitData, TransitData } from "./transit-data";
 
 const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
@@ -69,88 +70,11 @@ for (const collapser of document.body.getElementsByClassName("collapser")) {
 	collapser.disabled = false;
 }
 
-async function reachableCirclesFrom(
-	transitData: TransitData,
-	source: Coordinate,
-	options: {
-		maxWalkMinutes: number,
-		maxJourneyMinutes: number,
-	},
-): Promise<Map<`initial${number}` | StationOffset, WalkingLocus>> {
-	const circles = new Map<`initial${number}` | StationOffset, WalkingLocus>();
-	circles.set("initial0", {
-		coordinate: source,
-		arrivalMinutes: 0,
-	});
-
-	const walkableFromSource = new Map<StationOffset, number>();
-	for (const [stationOffset, matrixStation] of transitData.walkingData.stationCoordinates) {
-		const walkingHours = earthGreatCircleDistanceKm(source, matrixStation.coordinate) / STANDARD_WALKING_SPEED_KPH;
-		const walkingMinutes = walkingHours * 60;
-		if (walkingMinutes < Math.min(options.maxWalkMinutes, options.maxJourneyMinutes)) {
-			walkableFromSource.set(stationOffset, walkingMinutes);
-		}
-	}
-
-	const reachedList = findPathsThroughTrains(
-		transitData.trainOutEdges,
-		transitData.walkingData.matrix,
-		walkableFromSource,
-	);
-	for (const [stationOffset, path] of reachedList) {
-		if (path.parent !== null && path.edge.via === "train") {
-			circles.set(stationOffset, {
-				coordinate: transitData.walkingData.stationCoordinates.get(stationOffset)!.coordinate,
-				arrivalMinutes: path.distance,
-			});
-		}
-	}
-
-	return circles;
-}
-
-function mergeCircles(circlesBySource: Map<string | StationOffset, WalkingLocus>[]): Map<string | StationOffset, WalkingLocus> {
-	const nonEmpty = circlesBySource.filter(x => x.size !== 0);
-	if (nonEmpty.length === 1) {
-		return nonEmpty[0];
-	} else if (nonEmpty.length === 0) {
-		return new Map();
-	}
-
-	const grouped = new Map<StationOffset, WalkingLocus[]>();
-	for (const circles of circlesBySource) {
-		for (const [ref, circle] of circles) {
-			if (typeof ref !== "string") {
-				grouped.set(ref, grouped.get(ref) || []);
-				grouped.get(ref)!.push(circle);
-			}
-		}
-	}
-
-	const blended = new Map<StationOffset, WalkingLocus>();
-	for (const [ref, group] of grouped) {
-		if (group.length !== nonEmpty.length) {
-			continue;
-		}
-
-		let sumOfSquares = 0;
-		for (const v of group) {
-			sumOfSquares += v.arrivalMinutes ** 2;
-		}
-
-		sumOfSquares /= group.length;
-		const blendedArrivalMinutes = Math.sqrt(sumOfSquares);
-		blended.set(ref, {
-			coordinate: group[0].coordinate,
-			arrivalMinutes: blendedArrivalMinutes,
-		});
-	}
-	return blended;
-}
+export type Origin = { coordinate: Coordinate };
 
 async function generateInvertedIsoline(
 	transitData: TransitData,
-	sources: { coordinate: Coordinate }[],
+	origins: Origin[],
 	options: {
 		maxWalkMinutes: number,
 		maxJourneyMinutes: number,
@@ -163,13 +87,34 @@ async function generateInvertedIsoline(
 	},
 	properties: {},
 }> {
-	const circlesBySource = await Promise.all(sources.map(source => {
-		return reachableCirclesFrom(transitData, source.coordinate, options);
-	}));
+	const pathfinder = new Pathfinder<Origin>(transitData, new Map(origins.map(o => [o, o.coordinate])), {
+		...options,
+		trainTransferPenaltyMinutes: 3,
+		transferWalkingPenaltyMinutes: 3,
+	});
 
-	const circles = mergeCircles(circlesBySource);
+	const reachableFromOrigin = new Map<Origin, Map<unknown, ArrivalTime>>();
+	for (const origin of origins) {
+		const reachable = pathfinder.pathfindFrom(origin.coordinate);
+		reachableFromOrigin.set(origin, reachable);
+	}
 
-	const rings = await timer.timed("isolines", () => isolines([...circles.values()], options.maxJourneyMinutes, options));
+	const reachableFromAllOrigins: Map<Origin, ArrivalTime>[] = [
+		...zipKeyedMapsTotal(reachableFromOrigin)
+			.values()
+	];
+
+	const blendedArrivals: ArrivalTime[] = [];
+	for (const reached of reachableFromAllOrigins) {
+		const blendedArrival = blendArrivals(
+			new Map(
+				[...reached].map(([origin, arrival]) => [arrival, 1])
+			)
+		);
+		blendedArrivals.push(blendedArrival);
+	}
+
+	const rings = await timer.timed("isolines", () => isolines(blendedArrivals, options));
 
 	const geojson = geoJSONFromRingForest(
 		groupContainedRings(
@@ -258,38 +203,6 @@ async function main() {
 			});
 		}
 	};
-
-	const labelLayers = new GeojsonSourcesManager(map, async (req: { labelText: string, zoom: number, polygons: Coordinate[][] }) => {
-		const out = [];
-		for (const polygon of req.polygons) {
-			const simplified = simplifyPath(polygon, { zoom: req.zoom, stepTiles: 0.15 });
-			if (simplified.length >= 3) {
-				out.push(simplified);
-			}
-		}
-
-		const exploded: [lon: number, lat: number][][] = [];
-		for (const polygon of out) {
-			const stride = 7;
-			for (let i = 0; i + stride <= polygon.length || i === 0; i += stride) {
-				const section = polygon.slice(i, i + stride + 1);
-				exploded.push(
-					section.map(c => [c.lon, c.lat] as [lon: number, lat: number]),
-				);
-			}
-		}
-
-		return {
-			type: "Feature",
-			geometry: {
-				type: "MultiLineString",
-				coordinates: exploded,
-			},
-			properties: {
-				labelText: req.labelText,
-			},
-		} satisfies GeoJSON.Feature;
-	});
 
 	const isolineValues = [30, 40, 50];
 

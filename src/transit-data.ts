@@ -1,7 +1,8 @@
 import { earthGreatCircleDistanceKm, STANDARD_WALKING_SPEED_KPH } from "./geometry";
 import { loadLineLogos } from "./images";
 import { loadWikidata, Wikidata } from "./matchstations";
-import { loadMatrices, StationOffset, walkingMatrix } from "./search";
+import { loadMatrices } from "./search";
+import * as spatial from "./data/spatial";
 
 class WalkingData {
 	constructor(
@@ -39,6 +40,46 @@ export type TransitData = {
 	lines: MatrixLine[],
 };
 
+function walkingMatrix(
+	matrices: Matrices,
+	options: {
+		maxWalkMinutes: number,
+	},
+): { to: StationOffset, minutes: number }[][] {
+	const maxWalkKm = STANDARD_WALKING_SPEED_KPH * options.maxWalkMinutes;
+	let count = 0;
+
+	const walkingTransfers: { to: StationOffset, minutes: number }[][] = [];
+	for (let i = 0; i < matrices.stations.length; i++) {
+		walkingTransfers[i] = [];
+	}
+
+	const grid = new spatial.Spatial<MatrixStation>(12);
+	const indices = new Map<MatrixStation, StationOffset>();
+	for (let i = 0; i < matrices.stations.length; i++) {
+		indices.set(matrices.stations[i], i as StationOffset);
+		grid.add(matrices.stations[i]);
+	}
+
+	for (let from = 0; from < matrices.stations.length; from++) {
+		const fromStation = matrices.stations[from];
+
+		for (const toStation of grid.nearby(fromStation.coordinate, maxWalkKm)) {
+			const to = indices.get(toStation)!;
+			const distanceKm = earthGreatCircleDistanceKm(fromStation.coordinate, toStation.coordinate);
+
+			const minutes = distanceKm / STANDARD_WALKING_SPEED_KPH * 60;
+			if (minutes < options.maxWalkMinutes) {
+				walkingTransfers[from].push({ to, minutes });
+				walkingTransfers[to].push({ to: from as StationOffset, minutes });
+				count += 1;
+			}
+		}
+	}
+
+	return walkingTransfers;
+}
+
 export async function loadTransitData(
 	options: { maxWalkMinutes: number },
 ): Promise<TransitData> {
@@ -62,7 +103,7 @@ export async function loadTransitData(
 		trainOutEdges: matrices.matrices[0].distances,
 		walkingData: new WalkingData(
 			walkingMatrix(matrices, options),
-			new Map(matrices.stations.map((x, i) => [i, x])),
+			new Map(matrices.stations.map((x, i) => [i as StationOffset, x])),
 		),
 		wikidata,
 		stations: matrices.stations,

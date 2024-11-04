@@ -1,3 +1,5 @@
+type StationOffset = number & { __brand: "StationOffset" };
+
 type Coordinate = { readonly lat: number, readonly lon: number };
 
 type TrainLabel = {
@@ -12,7 +14,7 @@ type Stats = {
 };
 
 type MatrixDistance = {
-	to: number,
+	to: StationOffset,
 	/**
 	 * Includes wait, but no transfer penalty.
 	 */
