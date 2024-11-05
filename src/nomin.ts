@@ -18,11 +18,20 @@ export async function searchForPlace(q: string): Promise<{
 	const url = nominatumSearchURL(q);
 	const response = await fetch(url);
 	const json = await response.json();
-	return json.map((place: any) => {
+	const results: {
+		coordinate: Coordinate,
+		shortName: string,
+		fullName: string,
+	}[] = json.map((place: any) => {
 		return {
 			coordinate: { lat: place.lat, lon: place.lon } satisfies Coordinate,
 			shortName: place.name,
 			fullName: place.display_name,
 		};
+	});
+
+	return results.filter(place => {
+		return kantoBox[0] <= place.coordinate.lon && place.coordinate.lon <= kantoBox[2]
+			&& kantoBox[1] <= place.coordinate.lat && place.coordinate.lat <= kantoBox[3];
 	});
 }

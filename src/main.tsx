@@ -1,13 +1,14 @@
 import * as maplibregl from "maplibre-gl";
 import { ClusteredLabels } from "./components/ClusteredLabels";
 import { GeojsonSourcesManager } from "./components/GeojsonSourcesManager";
-import { zipKeyedMapsTotal } from "./data/data";
+import { Refreshing, Stabilizing, zipKeyedMapsTotal } from "./data/data";
 import { geoJSONFromRingForest, groupContainedRings } from "./data/spatial";
 import * as timer from "./data/timer";
 import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
 import { blendArrivals, Pathfinder } from "./pathfinding";
 import { ArrivalTime, isolines } from "./search";
 import { loadTransitData, TransitData } from "./transit-data";
+import { searchForPlace } from "./nomin";
 
 const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
 	Object.freeze({
@@ -74,7 +75,7 @@ export type Origin = { coordinate: Coordinate };
 
 async function generateInvertedIsoline(
 	transitData: TransitData,
-	origins: Origin[],
+	origins: Map<Origin, number>,
 	options: {
 		maxWalkMinutes: number,
 		maxJourneyMinutes: number,
@@ -87,14 +88,14 @@ async function generateInvertedIsoline(
 	},
 	properties: {},
 }> {
-	const pathfinder = new Pathfinder<Origin>(transitData, new Map(origins.map(o => [o, o.coordinate])), {
+	const pathfinder = new Pathfinder<Origin>(transitData, new Map([...origins.keys()].map(o => [o, o.coordinate])), {
 		...options,
 		trainTransferPenaltyMinutes: 3,
 		transferWalkingPenaltyMinutes: 3,
 	});
 
 	const reachableFromOrigin = new Map<Origin, Map<unknown, ArrivalTime>>();
-	for (const origin of origins) {
+	for (const [origin, _] of origins) {
 		const reachable = pathfinder.pathfindFrom(origin.coordinate);
 		reachableFromOrigin.set(origin, reachable);
 	}
@@ -108,7 +109,7 @@ async function generateInvertedIsoline(
 	for (const reached of reachableFromAllOrigins) {
 		const blendedArrival = blendArrivals(
 			new Map(
-				[...reached].map(([origin, arrival]) => [arrival, 1])
+				[...reached].map(([origin, arrival]) => [arrival, origins.get(origin)!])
 			)
 		);
 		blendedArrivals.push(blendedArrival);
@@ -133,6 +134,42 @@ async function generateInvertedIsoline(
 
 	return geojson;
 }
+
+type PlaceState = {
+	coordinate: Coordinate,
+	weight: number,
+};
+
+function encodePlaceState(place: PlaceState): string {
+	return `${place.coordinate.lon.toFixed(6)}_${place.coordinate.lat.toFixed(6)}_w${place.weight}`;
+}
+
+function decodePlaceState(place: string): PlaceState | null {
+	const match = place.match(/^([0-9.-]+)_([0-9.-]+)_w([0-9]+)$/);
+	if (match === null) {
+		return null;
+	}
+	return {
+		coordinate: {
+			lon: parseFloat(match[1]),
+			lat: parseFloat(match[2]),
+		},
+		weight: parseFloat(match[3]),
+	};
+}
+
+function encodePlaceStates(places: PlaceState[]): string {
+	return places.map(encodePlaceState).join("..");
+}
+
+function decodePlaceStates(hash: string): PlaceState[] {
+	return hash.split("..").map(decodePlaceState).filter(x => x !== null);
+}
+
+const markers: {
+	state: PlaceState,
+	marker: maplibregl.Marker,
+}[] = [];
 
 async function main() {
 	const loadTimeline = new timer.Timeline();
@@ -189,10 +226,14 @@ async function main() {
 			},
 		});
 
-	const shadelayers = new class Foo extends GeojsonSourcesManager<{ coordinate: Coordinate, options: { maxWalkMinutes: number, maxJourneyMinutes: number } }> {
+	const shadelayers = new class Foo extends GeojsonSourcesManager<{ origins: PlaceState[], options: { maxWalkMinutes: number, maxJourneyMinutes: number } }> {
 		constructor() {
-			super(map, async (req: { coordinate: Coordinate, options: { maxWalkMinutes: number, maxJourneyMinutes: number } }) => {
-				return await generateInvertedIsoline(transitData, [req], req.options,);
+			super(map, async (req: { origins: PlaceState[], options: { maxWalkMinutes: number, maxJourneyMinutes: number } }) => {
+				const origins = new Map();
+				for (const place of req.origins) {
+					origins.set(place, place.weight);
+				}
+				return await generateInvertedIsoline(transitData, origins, req.options,);
 			});
 		}
 	};
@@ -280,9 +321,16 @@ async function main() {
 		});
 	}
 
-	function rerenderIsolines(coordinate: Coordinate) {
+	function rerenderIsolines() {
+		const origins = markers.map(x => x.state);
+		const encodedState = encodePlaceStates(origins);
+		const searchParams = new URLSearchParams({
+			p: encodedState,
+		}).toString();
+		window.history.pushState({}, "", new URL("?" + searchParams, window.location.href));
+
 		shadelayers.recalculateSourceGeometry("basic", {
-			coordinate,
+			origins,
 			options: {
 				maxJourneyMinutes: 60,
 				maxWalkMinutes: 25,
@@ -290,7 +338,7 @@ async function main() {
 		});
 		for (const [k, v] of isolines) {
 			shadelayers.recalculateSourceGeometry(v.key, {
-				coordinate,
+				origins,
 				options: {
 					maxJourneyMinutes: k,
 					maxWalkMinutes: 25,
@@ -299,20 +347,85 @@ async function main() {
 		}
 	}
 
-	const marker = new maplibregl.Marker({ draggable: true })
-		.setLngLat(HACHIKO_COORDINATES)
-		.addTo(map);
+	const urlPlaceStates =
+		decodePlaceStates(new URL(window.location.href).searchParams.get("p") || "");
+	if (urlPlaceStates.length === 0) {
+		urlPlaceStates.push({
+			coordinate: HACHIKO_COORDINATES,
+			weight: 1,
+		});
+	}
 
-	marker.on("dragend", async () => {
-		const selected = marker.getLngLat();
-		const newCoordinate = { lat: selected.lat, lon: selected.lng };
+	for (const urlPlaceState of urlPlaceStates) {
+		const marker = new maplibregl.Marker({ draggable: true })
+			.setLngLat(urlPlaceState.coordinate)
+			.addTo(map);
 
-		rerenderIsolines(newCoordinate);
-		console.log("Current zoom:", map.getZoom());
-	});
-	rerenderIsolines(HACHIKO_COORDINATES);
+		marker.on("dragend", async () => {
+			const selected = marker.getLngLat();
+			const newCoordinate = { lat: selected.lat, lon: selected.lng };
+			const me = markers.find(x => x.marker === marker);
+			if (me) {
+				me.state = {
+					coordinate: newCoordinate,
+					weight: me.state.weight,
+				};
+			}
+
+			rerenderIsolines();
+		});
+
+		markers.push({
+			state: urlPlaceState,
+			marker,
+		});
+	}
+
+	rerenderIsolines();
 
 	console.log(loadTimeline.entries());
 }
 
 main();
+
+const nominateResults = document.getElementById("nominate-results") as HTMLUListElement;
+
+const nominateQueryResults = new Refreshing(
+	(searchString: string) => searchForPlace(searchString),
+	(placeList, searchString) => {
+		nominateResults.innerHTML = "";
+		if (placeList.length === 0) {
+			const li = document.createElement("li");
+			const i = document.createElement("i");
+			i.textContent = "No results for ";
+			const kbd = document.createElement("kbd");
+			kbd.textContent = searchString;
+			li.appendChild(i);
+			li.appendChild(kbd);
+			nominateResults.appendChild(li);
+		} else {
+			for (const place of placeList.slice(0, 5)) {
+				const li = document.createElement("li");
+				const b = document.createElement("b");
+				const br = document.createElement("br");
+				const d = document.createElement("small");
+				b.textContent = place.shortName;
+				d.textContent = place.fullName.trim().replace(/(?:, \d+-\d+)?, Japan$/g, "");
+				li.appendChild(b);
+				li.appendChild(br);
+				li.appendChild(d);
+				nominateResults.appendChild(li);
+			}
+		}
+	},
+);
+
+const nominateQuery = new Stabilizing<string>(700, searchString => {
+	nominateQueryResults.update(searchString);
+});
+
+const nominateInput = document.getElementById("nominate-input") as HTMLInputElement;
+nominateInput.disabled = false;
+nominateInput.oninput = () => {
+	nominateQuery.update(nominateInput.value);
+};
