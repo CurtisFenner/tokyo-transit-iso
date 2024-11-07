@@ -427,6 +427,19 @@ const nominateQueryResults = new Refreshing(
 				a.appendChild(br);
 				a.appendChild(d);
 				searchPanelResults.appendChild(a);
+
+				a.onclick = () => {
+					// Focus the map on the place.
+					console.log(place.coordinate);
+					map.flyTo({
+						// TODO: When the details panel is on the right side,
+						// we should offset the center towards the right.
+						center: [place.coordinate.lon + 0.003, place.coordinate.lat],
+						zoom: 14.5,
+						duration: 200,
+						essential: true,
+					});
+				};
 			}
 		}
 	},
@@ -443,7 +456,7 @@ nominateInput.oninput = () => {
 };
 
 const searchPanel = document.getElementById("over-search-container") as HTMLElement;
-const searchPanelFocused = new Stabilizing<boolean>(700, isSearchPanelFocused => {
+const searchPanelFocused = new Stabilizing<boolean>(400, isSearchPanelFocused => {
 	searchPanel.classList.toggle("search-panel-focused", isSearchPanelFocused);
 });
 

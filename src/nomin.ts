@@ -24,7 +24,7 @@ export async function searchForPlace(q: string): Promise<{
 		fullName: string,
 	}[] = json.map((place: any) => {
 		return {
-			coordinate: { lat: place.lat, lon: place.lon } satisfies Coordinate,
+			coordinate: { lat: place.lat * 1, lon: place.lon * 1 } satisfies Coordinate,
 			shortName: place.name,
 			fullName: place.display_name,
 		};

@@ -171,7 +171,8 @@ img.sliced {
 }
 
 button.blending,
-:link.blending {
+:link.blending,
+:visited.blending {
 	background: transparent;
 	border: none;
 	outline: none;
