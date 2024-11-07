@@ -130,6 +130,11 @@ input.blending::placeholder {
 	opacity: 0.75;
 }
 
+.dotted,
+input.dotted {
+	border: 1px dotted #0008;
+	border-radius: 0.2rem;
+}
 
 .main-sliding-collapsible {
 	position: fixed;
