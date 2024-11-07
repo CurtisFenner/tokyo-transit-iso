@@ -4,26 +4,57 @@
 		<meta charset="utf-8">
 		<title>Dynamic Map Demo</title>
 		<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
-		<link rel="stylesheet" href="/style.css" />
+		<link rel="stylesheet" href="/assets/style.css" />
 		<link href='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css' rel='stylesheet' />
 	</head>
 	<body>
-		<div style="position: fixed; width: 100%; height: 100%;">
+		<div style="position: absolute; width: 100%; height: 100%;">
 			<div id="map" style="position: relative; width: 100%; height: 100%"></div>
 		</div>
-		<section id="panel" class="panel plastic" style="display: flex; flex-direction: column; position: fixed; right: 0; top: 0; bottom: 0;">
-			<button class="collapser" disabled>
-				<img
-					style="width: 100%; height: 100%"
-					src="./right-arrow.svg">
-			</button>
-			<h2 style="padding-left: 1.5rem; flex: 0 0 4.5rem; height: 4.5rem; line-height: 4.5rem;">How far can trains take me in Tokyo?</h2>
-			<div id="root">
-				<div class="hr-title">Add a pin by searching</div>
-				<input disabled id="nominate-input" autocomplete="off" />
-				<ul id="nominate-results"></ul>
+
+		<div class="over-container">
+			<div id="over-search-container" class="over-search-container">
+				<div class="over-search-bar plastic black-plastic">
+					<input id="search-input"
+						class="blending padded"
+						style="flex: 1 0 auto;"
+						autocomplete="off"
+						placeholder="Search for a place">
+					<button id="search-button"
+						class="blending padded"
+						style="width: var(--search-height); height: var(--search-height);">
+						<svg style="opacity: 75%;"
+							viewBox="0 0 100 100"
+							xmlns="http://www.w3.org/2000/svg">
+							<path
+								fill="transparent"
+								stroke="currentColor"
+								stroke-width="10"
+								stroke-linecap="round"
+								d="
+									M 55 55
+									A 28.28 28.28 0 0 0 55 15
+									A 28.28 28.28 0 0 0 15 15
+									A 28.28 28.28 0 0 0 15 55
+									A 28.28 28.28 0 0 0 55 55
+									L 85 85
+								"
+							/>
+						</svg>
+					</button>
+				</div>
+				<section id="search-panel-results"
+					class="search-results plastic black-plastic padded">
+				</section>
 			</div>
-		</section>
+			<div id="wire-main-panel" class="over-details-container plastic padded">
+				<h1 style="line-height: 1.25em;">
+					How far can trains take me in Tokyo?
+				</h1>
+				<div class="hr-title">Add a pin here, near ...</div>
+			</div>
+		</div>
+
 		<script type="module" src="/src/main.tsx"></script>
 	</body>
 </html>

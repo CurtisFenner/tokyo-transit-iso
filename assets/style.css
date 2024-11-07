@@ -1,0 +1,229 @@
+html {
+	font-size: 16px;
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+
+input {
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+	font-size: 1em;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	padding: 0;
+	margin: 0;
+	height: 100vh;
+	overflow: hidden;
+	user-select: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5 {
+	padding: 0;
+	margin: 0;
+}
+
+h1 {
+	font-size: 1.65rem;
+}
+
+h2 {
+	font-size: 1.375rem;
+}
+
+.padded {
+	padding: 0.7rem;
+}
+
+.over-container {
+	position: fixed;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	max-width: 1000px;
+	width: 100%;
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	/* align-items: stretch;
+	align-content: stretch; */
+	--gap: 0.4rem;
+	--search-height: 3em;
+	padding: var(--gap);
+	gap: var(--gap);
+
+	/** You should be able to click through the transparent parts.*/
+	pointer-events: none;
+	user-select: none;
+}
+
+.over-search-container {
+	flex: 1 1 0;
+	min-width: 16em;
+}
+
+.over-search-bar {
+	display: flex;
+	flex-direction: row;
+	height: var(--search-height);
+
+	pointer-events: initial;
+}
+
+.search-results {
+	margin-top: var(--gap);
+	margin-bottom: var(--gap);
+
+	/** Initially hidden. */
+	display: none;
+
+	pointer-events: initial;
+}
+
+.search-panel-focused .search-results.has-results {
+	display: block;
+}
+
+.search-result {
+	display: block;
+	padding: var(--panel-padding);
+}
+
+.over-details-container {
+	min-width: 24em;
+	flex: 1 1 0;
+
+	pointer-events: initial;
+}
+
+.plastic {
+	background: #FFF2;
+	backdrop-filter: blur(25px);
+	box-shadow: 0 0 20px -16px black, 0 0 10px -8px black, 0 0 5px -4px black;
+	border-radius: 0.375rem;
+}
+
+.plastic.black-plastic {
+	background: #0008;
+	color: white;
+}
+
+input.blending {
+	background: transparent;
+	color: inherit;
+	border: none;
+	outline: none;
+}
+
+input.blending::placeholder {
+	color: inherit;
+	font-style: italic;
+	opacity: 0.75;
+}
+
+
+.main-sliding-collapsible {
+	position: fixed;
+	--arrow-margin: 4.5rem;
+	--full-width: 35rem;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	width: var(--full-width);
+	user-select: none;
+	transition: right 0.5s ease-in-out;
+}
+
+.main-sliding-collapsible.collapsed {
+	right: calc(var(--arrow-margin) + 0.25rem - var(--full-width));
+}
+
+.main-panel {
+	position: relative;
+	user-select: text;
+	padding-left: var(--arrow-margin);
+	padding-right: var(--arrow-margin);
+	height: 100%;
+}
+
+@media only screen and (max-width: 43rem) {
+	.main-sliding-collapsible {
+		--full-width: calc(100vw - 2 * var(--arrow-margin));
+	}
+}
+
+img.sliced {
+	object-position: var(--slice-top) var(--slice-left);
+	object-fit: none;
+}
+
+.collapsed .collapser {
+	transform: rotate(180deg);
+}
+
+button.blending,
+:link.blending {
+	background: transparent;
+	border: none;
+	outline: none;
+	cursor: pointer;
+	user-select: none;
+	color: inherit;
+	text-decoration: none;
+	font-size: 1em;
+}
+
+button.blending:hover,
+button.blending:active,
+:link:hover,
+:link:active {
+	background: #0003;
+	border-radius: 0.375rem;
+}
+
+.collapser {
+	width: var(--arrow-margin);
+	height: var(--arrow-margin);
+	font-family: inherit;
+	font-size: 2rem;
+	line-height: var(--arrow-margin);
+	padding: 0;
+	margin: 0;
+	text-align: center;
+
+	transform: rotate(0deg);
+
+	position: absolute;
+	left: 0;
+	top: 0;
+	user-select: none;
+	transition: transform 0.5s ease-in-out;
+}
+
+.collapser:disabled {
+	color: gray;
+}
+
+.unclickable {
+	pointer-events: none;
+	user-select: none;
+}
+
+.train-station-label {
+	background: #FFFD;
+	box-shadow: black 0 0 4px -1px;
+	border-radius: 4px;
+	font-size: 12px;
+	font-weight: bold;
+	padding: 0.25em;
+	line-height: 1em;
+}

@@ -51,23 +51,24 @@ map.touchZoomRotate.disableRotation();
 map.keyboard.disableRotation();
 map.dragRotate.disable();
 
+function collapsibleAbove(e: HTMLElement): HTMLElement {
+	if (e.classList.contains("collapsible")) {
+		return e;
+	} else if (!e.parentElement) {
+		throw new Error("collapser does not have a .collapsible ancestor");
+	} else {
+		return collapsibleAbove(e.parentElement);
+	}
+}
+
 for (const collapser of document.body.getElementsByClassName("collapser")) {
 	if (!(collapser instanceof HTMLButtonElement)) {
 		throw new Error("collapser class should only be applied to buttons");
 	}
-
-	let collapsed = false;
 	collapser.onclick = () => {
-		collapsed = !collapsed;
-		if (collapsed) {
-			collapser.parentElement!.style.right = "calc(-3rem - var(--full-width))";
-			collapser.style.transform = "rotate(180deg)";
-		} else {
-			collapser.parentElement!.style.right = "0px";
-			collapser.style.transform = "rotate(0deg)";
-		}
+		const collapsible = collapsibleAbove(collapser);
+		collapsible.classList.toggle("collapsed");
 	};
-
 	collapser.disabled = false;
 }
 
@@ -388,44 +389,80 @@ async function main() {
 
 main();
 
-const nominateResults = document.getElementById("nominate-results") as HTMLUListElement;
+const searchPanelResults = document.getElementById("search-panel-results") as HTMLElement;
 
 const nominateQueryResults = new Refreshing(
 	(searchString: string) => searchForPlace(searchString),
 	(placeList, searchString) => {
-		nominateResults.innerHTML = "";
+		searchPanelResults.innerHTML = "";
+
+		if (searchString.trim() === "") {
+			searchPanelResults.classList.remove("has-results");
+			return;
+		}
+		searchPanelResults.classList.add("has-results");
+
 		if (placeList.length === 0) {
-			const li = document.createElement("li");
+			const li = document.createElement("div");
 			const i = document.createElement("i");
 			i.textContent = "No results for ";
 			const kbd = document.createElement("kbd");
 			kbd.textContent = searchString;
 			li.appendChild(i);
 			li.appendChild(kbd);
-			nominateResults.appendChild(li);
+			searchPanelResults.appendChild(li);
 		} else {
 			for (const place of placeList.slice(0, 5)) {
-				const li = document.createElement("li");
+				const a = document.createElement("a");
+				a.classList.add("blending", "search-result", "padded");
+				a.href = "#";
+				a.onclick = e => { e.preventDefault(); return false; };
+
 				const b = document.createElement("b");
 				const br = document.createElement("br");
 				const d = document.createElement("small");
 				b.textContent = place.shortName;
 				d.textContent = place.fullName.trim().replace(/(?:, \d+-\d+)?, Japan$/g, "");
-				li.appendChild(b);
-				li.appendChild(br);
-				li.appendChild(d);
-				nominateResults.appendChild(li);
+				a.appendChild(b);
+				a.appendChild(br);
+				a.appendChild(d);
+				searchPanelResults.appendChild(a);
 			}
 		}
 	},
 );
 
-const nominateQuery = new Stabilizing<string>(700, searchString => {
+const nominateQuery = new Stabilizing<string>(500, searchString => {
 	nominateQueryResults.update(searchString);
 });
 
-const nominateInput = document.getElementById("nominate-input") as HTMLInputElement;
+const nominateInput = document.getElementById("search-input") as HTMLInputElement;
 nominateInput.disabled = false;
 nominateInput.oninput = () => {
 	nominateQuery.update(nominateInput.value);
 };
+
+const searchPanel = document.getElementById("over-search-container") as HTMLElement;
+const searchPanelFocused = new Stabilizing<boolean>(700, isSearchPanelFocused => {
+	searchPanel.classList.toggle("search-panel-focused", isSearchPanelFocused);
+});
+
+function focusOnSearchResults() {
+	searchPanelFocused.update(true, 10);
+}
+
+searchPanel.addEventListener("focusin", focusOnSearchResults);
+searchPanel.addEventListener("pointerdown", focusOnSearchResults);
+searchPanel.addEventListener("click", focusOnSearchResults);
+
+function detectBlurOfSearchResults(e: Event) {
+	if (!e.target || (e.target instanceof Node && !searchPanel.contains(e.target))) {
+		searchPanelFocused.update(false);
+		if (nominateInput.value.trim() === "") {
+			nominateInput.value = "";
+		}
+	}
+}
+document.body.addEventListener("focusin", detectBlurOfSearchResults);
+document.body.addEventListener("pointerdown", detectBlurOfSearchResults);
+document.body.addEventListener("click", detectBlurOfSearchResults);

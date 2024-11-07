@@ -32,7 +32,7 @@ export class Stabilizing<T> {
 
 	private timer: null | number = null;
 	private lastValue: null | T = null;
-	update(value: T): void {
+	update(value: T, millis: number = this.millis): void {
 		if (this.lastValue === value) {
 			return;
 		}
@@ -41,9 +41,15 @@ export class Stabilizing<T> {
 		if (this.timer !== null) {
 			clearTimeout(this.timer);
 		}
-		this.timer = setTimeout(() => {
+
+		if (millis <= 0) {
 			this.onStabilize(this.lastValue!);
-		}, this.millis);
+			this.timer = null;
+		} else {
+			this.timer = setTimeout(() => {
+				this.onStabilize(this.lastValue!);
+			}, millis);
+		}
 	}
 }
 
