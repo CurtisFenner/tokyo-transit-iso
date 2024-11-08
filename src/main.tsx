@@ -75,6 +75,40 @@ for (const collapser of document.body.getElementsByClassName("collapser")) {
 
 export type Origin = { coordinate: Coordinate };
 
+async function generateInvertedIsolines(
+	transitData: TransitData,
+	origins: Map<Origin, number>,
+	options: {
+		maxWalkMinutes: number,
+		maxJourneyMinutes: number[],
+	},
+): Promise<{
+	type: "Feature",
+	geometry: {
+		type: "MultiPolygon",
+		coordinates: [lon: number, lat: number][][][],
+	},
+	properties: {},
+}> {
+	const coordinates = [];
+	for (const max of options.maxJourneyMinutes) {
+		const line = await generateInvertedIsoline(transitData, origins, {
+			maxWalkMinutes: options.maxWalkMinutes,
+			maxJourneyMinutes: max,
+		});
+		coordinates.push(...line.geometry.coordinates);
+	}
+
+	return {
+		type: "Feature",
+		geometry: {
+			type: "MultiPolygon",
+			coordinates,
+		},
+		properties: [],
+	};
+}
+
 async function generateInvertedIsoline(
 	transitData: TransitData,
 	origins: Map<Origin, number>,
@@ -173,10 +207,12 @@ const markers: {
 }[] = [];
 
 const placeListDiv = document.getElementById("place-list-div")!;
+const settingsMaxCommuteInput = document.getElementById("settings-max-commute-input") as HTMLInputElement;
+const settingsWalkInput = document.getElementById("settings-walk-input") as HTMLInputElement;
 
 function addPlaceToState(
 	state: PlaceState,
-	rerenderIsolines: () => void,
+	rerender: (mode?: "cheap") => void,
 ): void {
 	const marker = new maplibregl.Marker({ draggable: true })
 		.setLngLat(state.coordinate)
@@ -193,7 +229,7 @@ function addPlaceToState(
 			};
 		}
 
-		rerenderIsolines();
+		rerender();
 	});
 
 	const row = document.createElement("div");
@@ -204,6 +240,16 @@ function addPlaceToState(
 	titleInput.value = state.title;
 	titleInput.style.fontWeight = "bold";
 	titleInput.style.flex = "1 1 0";
+	titleInput.addEventListener("input", () => {
+		const me = markers.find(x => x.marker === marker);
+		if (me) {
+			me.state = {
+				...me.state,
+				title: titleInput.value.trim(),
+			};
+			rerender("cheap");
+		}
+	});
 	row.appendChild(titleInput);
 
 	const trashButton = document.createElement("button");
@@ -215,7 +261,7 @@ function addPlaceToState(
 		markers.splice(0, markers.length, ...markers.filter(m => m.marker !== marker));
 		row.parentElement?.removeChild(row);
 		marker.remove();
-		rerenderIsolines();
+		rerender();
 	};
 	row.appendChild(trashButton);
 
@@ -227,7 +273,7 @@ function addPlaceToState(
 		row,
 	});
 
-	rerenderIsolines();
+	rerender();
 }
 
 async function main() {
@@ -285,33 +331,20 @@ async function main() {
 			},
 		});
 
-	const shadelayers = new class Foo extends GeojsonSourcesManager<{ origins: PlaceState[], options: { maxWalkMinutes: number, maxJourneyMinutes: number } }> {
+	const shadelayers = new class Foo extends GeojsonSourcesManager<{ origins: PlaceState[], options: { maxWalkMinutes: number, maxJourneyMinutes: number[] } }> {
 		constructor() {
-			super(map, async (req: { origins: PlaceState[], options: { maxWalkMinutes: number, maxJourneyMinutes: number } }) => {
+			super(map, async (req: { origins: PlaceState[], options: { maxWalkMinutes: number, maxJourneyMinutes: number[] } }) => {
 				const origins = new Map();
 				for (const place of req.origins) {
 					origins.set(place, place.weight);
 				}
-				return await generateInvertedIsoline(transitData, origins, req.options,);
+				return await generateInvertedIsolines(transitData, origins, req.options);
 			});
 		}
 	};
 
-	const isolineValues = [30, 40, 50];
-
-	const isolines = new Map(isolineValues.map(isolineValue => {
-		const key = "iso-" + isolineValue;
-		return [
-			isolineValue,
-			{
-				minutes: isolineValue,
-				key,
-				sourceID: shadelayers.createSource(key),
-			},
-		];
-	}));
-
 	const isoSourceIDBasic = shadelayers.createSource("basic");
+	const isoSourceInner = shadelayers.createSource("inner");
 
 	map.addLayer({
 		id: Math.random().toString(),
@@ -349,62 +382,72 @@ async function main() {
 		},
 	});
 
-	for (const [_, v] of isolines) {
-		map.addLayer({
-			id: v.key + "-line",
-			type: "line",
-			source: v.sourceID,
-			layout: {
-				"line-cap": "round",
-				"line-join": "round",
-			},
-			paint: {
-				"line-color": "black",
-				"line-width": 1.5,
-				"line-opacity": 0.35,
-				"line-dasharray": [2, 3],
-			},
-		});
+	map.addLayer({
+		id: "inner-line",
+		type: "line",
+		source: isoSourceInner,
+		layout: {
+			"line-cap": "round",
+			"line-join": "round",
+		},
+		paint: {
+			"line-color": "black",
+			"line-width": 1.5,
+			"line-opacity": 0.35,
+			"line-dasharray": [2, 3],
+		},
+	});
 
-		map.addLayer({
-			id: v.key + "-inset-blur",
-			type: "line",
-			source: v.sourceID,
-			paint: {
-				"line-color": "black",
-				"line-width": 8,
-				"line-blur": 8,
-				"line-offset": -2,
-				"line-opacity": 0.25,
-			},
-		});
-	}
+	map.addLayer({
+		id: "inner-inset-blur",
+		type: "line",
+		source: isoSourceInner,
+		paint: {
+			"line-color": "black",
+			"line-width": 8,
+			"line-blur": 8,
+			"line-offset": -2,
+			"line-opacity": 0.25,
+		},
+	});
 
-	function rerenderIsolines() {
+	function rerenderIsolines(mode?: "cheap") {
 		const origins = markers.map(x => x.state);
 		const encodedStates = origins.map(encodePlaceState);
 		const searchParams = new URLSearchParams(encodedStates.length === 1
 			? { p: encodedStates[0] }
 			: Object.fromEntries(encodedStates.map((value, i) => [`p${i + 1}`, value]))
 		).toString();
+
 		window.history.pushState({}, "", new URL("?" + searchParams, window.location.href));
+
+		if (mode === "cheap") {
+			return;
+		}
+
+		const maxJourneyMinutes = parseFloat(settingsMaxCommuteInput.value);
+		const maxWalkMinutes = parseFloat(settingsWalkInput.value);
 
 		shadelayers.recalculateSourceGeometry("basic", {
 			origins,
 			options: {
-				maxJourneyMinutes: 60,
+				maxJourneyMinutes: [maxJourneyMinutes],
+				maxWalkMinutes: maxWalkMinutes,
+			},
+		});
+
+		const values = [];
+		for (let minute = 15; minute + 3.51 < maxJourneyMinutes; minute += 15) {
+			values.push(minute);
+		}
+
+		shadelayers.recalculateSourceGeometry("inner", {
+			origins,
+			options: {
+				maxJourneyMinutes: values,
 				maxWalkMinutes: 25,
 			},
 		});
-		for (const [k, v] of isolines) {
-			shadelayers.recalculateSourceGeometry(v.key, {
-				origins,
-				options: {
-					maxJourneyMinutes: k,
-					maxWalkMinutes: 25,
-				},
-			});
-		}
 	}
 
 	const queryParameters = new URL(window.location.href).searchParams;
@@ -458,6 +501,13 @@ async function main() {
 			weight: 1,
 		}, rerenderIsolines);
 	});
+	addDestinationButton.disabled = false;
+
+	settingsMaxCommuteInput.addEventListener("change", () => rerenderIsolines());
+	settingsMaxCommuteInput.disabled = false;
+
+	settingsWalkInput.addEventListener("change", () => rerenderIsolines());
+	settingsWalkInput.disabled = false;
 
 	console.log(loadTimeline.entries());
 }

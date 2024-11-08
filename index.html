@@ -73,7 +73,7 @@
 				<div id="place-list-div">
 				</div>
 				<br />
-				<button id="add-destination-button" class="dotted blending padded">
+				<button disabled id="add-destination-button" class="dotted blending padded">
 					Add another destination <b id="add-destination-here-span">here</b>
 				</button>
 
@@ -82,6 +82,14 @@
 					<span class="word">Settings</span>
 					<span class=bar></span>
 				</div>
+				Max door-to-door commute:
+				<input disabled class="blending dotted padded" id="settings-max-commute-input" type="number" min=15 max=240 value=30 step=5 />
+				minutes
+				<br />
+				<br />
+				Max walk to station:
+				<input disabled class="blending dotted padded" id="settings-walk-input" type="number" min=5 max=60 value=25 />
+				minutes
 			</div>
 		</div>
 
