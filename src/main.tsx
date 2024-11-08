@@ -9,6 +9,7 @@ import { blendArrivals, Pathfinder } from "./pathfinding";
 import { ArrivalTime, isolines } from "./search";
 import { loadTransitData, TransitData } from "./transit-data";
 import { searchForPlace } from "./nomin";
+import { earthGreatCircleDistanceKm } from "./geometry";
 
 const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
 	Object.freeze({
@@ -225,6 +226,8 @@ function addPlaceToState(
 		marker,
 		row,
 	});
+
+	rerenderIsolines();
 }
 
 async function main() {
@@ -425,6 +428,36 @@ async function main() {
 	}
 
 	rerenderIsolines();
+
+	const addDestinationButton = document.getElementById("add-destination-button") as HTMLButtonElement;
+	const addDestinationHereSpan = document.getElementById("add-destination-here-span")!;
+
+	function nearestStation(query: Coordinate): MatrixStation {
+		let nearest = transitData.stations[0];
+		for (const station of transitData.stations) {
+			const nearestDistance = earthGreatCircleDistanceKm(nearest.coordinate, query);
+			const distance = earthGreatCircleDistanceKm(station.coordinate, query);
+			if (distance < nearestDistance) {
+				nearest = station;
+			}
+		}
+		return nearest;
+	}
+
+	addDestinationButton.addEventListener("click", () => {
+		const rawCenter = map.getCenter();
+		const offsetCenter: Coordinate = {
+			lon: rawCenter.lng,
+			lat: rawCenter.lat,
+		};
+
+		const nearest = nearestStation(offsetCenter);
+		addPlaceToState({
+			title: "Near " + nearest.name,
+			coordinate: offsetCenter,
+			weight: 1,
+		}, rerenderIsolines);
+	});
 
 	console.log(loadTimeline.entries());
 }
