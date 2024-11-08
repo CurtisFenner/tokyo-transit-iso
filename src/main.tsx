@@ -182,7 +182,7 @@ function encodePlaceState(place: PlaceState): string {
 }
 
 function decodePlaceState(place: string): PlaceState | null {
-	const match = place.match(/^([0-9.-]+)_([0-9.-]+)_w([0-9]+)_t$(.*)$/);
+	const match = place.match(/^([0-9.-]+)_([0-9.-]+)_w([0-9]+)_t(.*)$/);
 	if (match === null) {
 		return null;
 	}
@@ -451,12 +451,21 @@ async function main() {
 			origins,
 			options: {
 				maxJourneyMinutes: values,
-				maxWalkMinutes: 25,
+				maxWalkMinutes: maxWalkMinutes,
 			},
 		});
 	}
 
 	const queryParameters = new URL(window.location.href).searchParams;
+
+	settingsMaxCommuteInput.value = (parseFloat(queryParameters.get("max")!) || 50).toFixed(0);
+	settingsMaxCommuteInput.addEventListener("change", () => rerenderIsolines());
+	settingsMaxCommuteInput.disabled = false;
+
+	settingsWalkInput.value = (parseFloat(queryParameters.get("walk")!) || 15).toFixed(0);
+	settingsWalkInput.addEventListener("change", () => rerenderIsolines());
+	settingsWalkInput.disabled = false;
+
 	const placeParameters = [...queryParameters]
 		.filter(([key]) => /^p[0-9]*/.test(key))
 		.map(([_, value]) => value);
@@ -507,14 +516,6 @@ async function main() {
 	});
 	addDestinationButton.disabled = false;
 
-	settingsMaxCommuteInput.addEventListener("change", () => rerenderIsolines());
-	settingsMaxCommuteInput.value = (parseFloat(queryParameters.get("max")!) || 50).toFixed(0);
-	settingsMaxCommuteInput.disabled = false;
-
-	settingsWalkInput.addEventListener("change", () => rerenderIsolines());
-	settingsWalkInput.value = (parseFloat(queryParameters.get("walk")!) || 15).toFixed(0);
-	settingsWalkInput.disabled = false;
-
 	rerenderIsolines();
 	console.log(loadTimeline.entries());
 }
@@ -562,7 +563,6 @@ const nominateQueryResults = new Refreshing(
 
 				a.onclick = () => {
 					// Focus the map on the place.
-					console.log(place.coordinate);
 					map.flyTo({
 						// TODO: When the details panel is on the right side,
 						// we should offset the center towards the right.
