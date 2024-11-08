@@ -414,10 +414,16 @@ async function main() {
 	function rerenderIsolines(mode?: "cheap") {
 		const origins = markers.map(x => x.state);
 		const encodedStates = origins.map(encodePlaceState);
-		const searchParams = new URLSearchParams(encodedStates.length === 1
+
+		const placeParams = encodedStates.length === 1
 			? { p: encodedStates[0] }
-			: Object.fromEntries(encodedStates.map((value, i) => [`p${i + 1}`, value]))
-		).toString();
+			: Object.fromEntries(encodedStates.map((value, i) => [`p${i + 1}`, value]));
+		const settingsParams = {
+			max: settingsMaxCommuteInput.value,
+			walk: settingsWalkInput.value,
+		};
+
+		const searchParams = new URLSearchParams({ ...placeParams, ...settingsParams }).toString();
 
 		window.history.pushState({}, "", new URL("?" + searchParams, window.location.href));
 
@@ -470,8 +476,6 @@ async function main() {
 		}, rerenderIsolines);
 	}
 
-	rerenderIsolines();
-
 	const addDestinationButton = document.getElementById("add-destination-button") as HTMLButtonElement;
 	const addDestinationHereSpan = document.getElementById("add-destination-here-span")!;
 
@@ -504,11 +508,14 @@ async function main() {
 	addDestinationButton.disabled = false;
 
 	settingsMaxCommuteInput.addEventListener("change", () => rerenderIsolines());
+	settingsMaxCommuteInput.value = (parseFloat(queryParameters.get("max")!) || 50).toFixed(0);
 	settingsMaxCommuteInput.disabled = false;
 
 	settingsWalkInput.addEventListener("change", () => rerenderIsolines());
+	settingsWalkInput.value = (parseFloat(queryParameters.get("walk")!) || 15).toFixed(0);
 	settingsWalkInput.disabled = false;
 
+	rerenderIsolines();
 	console.log(loadTimeline.entries());
 }
 
