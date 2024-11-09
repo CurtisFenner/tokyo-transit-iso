@@ -1,6 +1,6 @@
-import { timed } from "./data/timer";
-import { STANDARD_WALKING_SPEED_KPH } from "./geometry";
-import { assignTiles, groupAndOutlineTiles } from "./regions";
+import * as v2 from "./data/v2";
+import { LocalPlane, STANDARD_WALKING_SPEED_KPH } from "./geometry";
+import { HACHIKO_COORDINATES } from "./matchstations";
 
 export type ArrivalTime = {
 	coordinate: Coordinate,
@@ -42,40 +42,42 @@ export function toLonLat(coordinate: Coordinate): [number, number] {
 }
 
 export async function isolines(
-	circles: ArrivalTime[],
+	arrivalTimes: ArrivalTime[],
 	options: {
 		maxJourneyMinutes: number,
 		maxWalkMinutes: number,
 	},
-) {
-	const tiles = await timed(`assignTiles(${options.maxJourneyMinutes})`, () => assignTiles(circles, {
-		boxKm: 0.8,
-		maxRadiusKm: options.maxWalkMinutes * STANDARD_WALKING_SPEED_KPH / 60,
-		speedKmPerMin: STANDARD_WALKING_SPEED_KPH / 60,
-		maxMinutes: options.maxJourneyMinutes,
-	}));
-	const allInside = new Set<string>();
-	for (const tile of tiles.cells) {
-		allInside.add(`${tile.tile.gx},${tile.tile.gy}`);
-	}
-	const patches = await timed(`groupAndOutlineTiles(${options.maxJourneyMinutes})`, async () => {
-		return groupAndOutlineTiles(tiles.cells.map(x => {
-			return {
-				tile: x.tile,
-				arrival: null,
-			};
-		}));
-	});
+): Promise<{ boundaries: Coordinate[][] }> {
+	const localPlane = LocalPlane.nearPoint(HACHIKO_COORDINATES);
+	console.log(arrivalTimes.length, "arrivalTimes");
 
-	const boundaries: Coordinate[][] = [];
-	for (const patch of patches) {
-		for (const boundary of patch.boundaries) {
-			const coordinates = boundary.map(x => x.toCorner).map(cornerID => tiles.corners.get(cornerID)!);
-			boundaries.push(coordinates);
+	const circles = [];
+	for (const arrivalTime of arrivalTimes) {
+		const localCoordinate = localPlane.toLocal(arrivalTime.coordinate);
+
+		const walkingMinutes = Math.min(
+			options.maxWalkMinutes,
+			Math.max(0, options.maxJourneyMinutes - arrivalTime.arrivalMinutes),
+		);
+		const radiusKm = walkingMinutes * STANDARD_WALKING_SPEED_KPH / 60;
+
+		circles.push({
+			center: {
+				x: localCoordinate.xKm,
+				y: localCoordinate.yKm,
+			},
+			radius: radiusKm,
+		});
+	}
+
+	const merged = v2.mergeCirclesIntoArcPaths(circles);
+	{
+		const boundaries: Coordinate[][] = [];
+		for (const shape of merged) {
+			const boundary = shape.map(l => localPlane.toGlobe({ xKm: l.x, yKm: l.y }))
+			boundaries.push([...boundary]);
 		}
-	}
 
-	return {
-		boundaries,
-	};
+		return { boundaries };
+	}
 }
