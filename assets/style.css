@@ -107,7 +107,7 @@ h2 {
 }
 
 .plastic {
-	background: #FFF2;
+	background: #FFF4;
 	backdrop-filter: blur(25px);
 	box-shadow: 0 0 20px -16px black, 0 0 10px -8px black, 0 0 5px -4px black;
 	border-radius: 0.375rem;

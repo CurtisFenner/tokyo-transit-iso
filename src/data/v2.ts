@@ -91,8 +91,8 @@ export function mergeCirclesIntoArcPaths(circles0: Circle[]): V2[][] {
 	for (const circle of circles) {
 		const neighbors = [...nearby.queryWithin(circle.center, circle.radius + largestRadius)];
 		let contained = false;
-		const rotate = Math.random() * Math.PI / 2;
-		const cutThetas = [0, 1, 2, 3].map(q => rotate + q * Math.PI / 2);
+		const rotate = 0 * Math.PI / 2;
+		const cutThetas = [0, 1, 2, 3, 4, 5, 6, 7].map(q => rotate + q / 8 * Math.PI * 2);
 		const cuttingNeighbors = new Set<Circle>();
 		for (const neighbor of neighbors) {
 			if (neighbor === circle) {
