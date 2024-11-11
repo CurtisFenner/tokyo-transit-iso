@@ -70,7 +70,6 @@ function walkingMatrix(
 			const minutes = distanceKm / STANDARD_WALKING_SPEED_KPH * 60;
 			if (minutes < options.maxWalkMinutes) {
 				walkingTransfers[from].push({ to, minutes });
-				walkingTransfers[to].push({ to: from as StationOffset, minutes });
 				count += 1;
 			}
 		}

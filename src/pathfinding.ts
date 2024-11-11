@@ -3,6 +3,15 @@ import { earthGreatCircleDistanceKm, STANDARD_WALKING_SPEED_KPH } from "./geomet
 import { ArrivalTime } from "./search";
 import { TransitData } from "./transit-data";
 
+export type PathEdge = {
+	tag: "walking"
+} | {
+	tag: "train",
+	train: { label: TrainLabel, from: StationOffset },
+};
+
+type Reachable = { arrivalTime: ArrivalTime, edge: PathEdge };
+
 export class Pathfinder<K> {
 	constructor(
 		private transitData: TransitData,
@@ -15,8 +24,8 @@ export class Pathfinder<K> {
 		},
 	) { }
 
-	pathfindFrom(from: Coordinate): Map<K | StationOffset, ArrivalTime> {
-		const shortestPath = new Map<StationOffset, ArrivalTime>(
+	pathfindFrom(from: Coordinate): Map<K | StationOffset, Reachable> {
+		const shortestPath = new Map<StationOffset, Reachable>(
 			[...this.transitData.walkingData.nearby(from)].filter(value => {
 				const walkingTimeLimitMinutes = Math.min(
 					this.options.maxWalkMinutes,
@@ -25,9 +34,12 @@ export class Pathfinder<K> {
 				return value.timeMinutes < walkingTimeLimitMinutes;
 			}).map(value => {
 				return [value.stationID, {
-					coordinate: this.transitData.stations[value.stationID].coordinate,
-					arrivalMinutes: value.timeMinutes,
-					finalWalkingLegMinutes: value.timeMinutes,
+					arrivalTime: {
+						coordinate: this.transitData.stations[value.stationID].coordinate,
+						arrivalMinutes: value.timeMinutes,
+						finalWalkingLegMinutes: value.timeMinutes,
+					},
+					edge: { tag: "walking" },
 				}];
 			}),
 		);
@@ -36,25 +48,25 @@ export class Pathfinder<K> {
 			return a.arrival.arrivalMinutes < b.arrival.arrivalMinutes ? "<" : ">";
 		});
 		for (const [stationOffset, arrival] of shortestPath) {
-			traversalOrder.push({ stationOffset, arrival });
+			traversalOrder.push({ stationOffset, arrival: arrival.arrivalTime });
 		}
 
-		const pushNeighborArrival = (at: StationOffset, arrival: ArrivalTime) => {
+		const pushNeighborArrival = (at: StationOffset, arrival: ArrivalTime, edge: PathEdge) => {
 			if (arrival.arrivalMinutes > this.options.maxJourneyMinutes
 				|| arrival.finalWalkingLegMinutes > this.options.maxWalkMinutes) {
 				return;
 			}
 
 			const previousBest = shortestPath.get(at);
-			if (previousBest === undefined || previousBest.arrivalMinutes > arrival.arrivalMinutes) {
-				shortestPath.set(at, arrival);
+			if (previousBest === undefined || previousBest.arrivalTime.arrivalMinutes > arrival.arrivalMinutes) {
+				shortestPath.set(at, { arrivalTime: arrival, edge });
 				traversalOrder.push({ stationOffset: at, arrival });
 			}
 		}
 
 		while (traversalOrder.size() !== 0) {
 			const top = traversalOrder.pop();
-			if (top.arrival.arrivalMinutes > shortestPath.get(top.stationOffset)!.arrivalMinutes) {
+			if (top.arrival.arrivalMinutes > shortestPath.get(top.stationOffset)!.arrivalTime.arrivalMinutes) {
 				continue;
 			}
 
@@ -72,7 +84,14 @@ export class Pathfinder<K> {
 					arrivalMinutes: top.arrival.arrivalMinutes + trainTime,
 					finalWalkingLegMinutes: 0,
 				};
-				pushNeighborArrival(trainNeighbor.to, neighborArrival);
+
+				pushNeighborArrival(trainNeighbor.to, neighborArrival, {
+					tag: "train",
+					train: {
+						from: top.stationOffset,
+						label: trainNeighbor.route[0],
+					},
+				});
 			}
 
 			// Walking neighbors
@@ -86,12 +105,12 @@ export class Pathfinder<K> {
 					arrivalMinutes: top.arrival.arrivalMinutes + walkTime,
 					finalWalkingLegMinutes: walkTime,
 				};
-				pushNeighborArrival(walkingNeighbor.to, walkingArrival);
+				pushNeighborArrival(walkingNeighbor.to, walkingArrival, { tag: "walking" });
 			}
 		}
 
 		// Walk to each landmark.
-		const landmarkPaths = new Map<K, ArrivalTime>();
+		const landmarkPaths = new Map<K, Reachable>();
 		for (const [landmark, landmarkCoordinate] of this.landmarks) {
 			const walkFromFromMinutes = walkingMinutesBetween(from, landmarkCoordinate);
 			let shortestWalk: ArrivalTime = {
@@ -101,15 +120,15 @@ export class Pathfinder<K> {
 			};
 
 			for (const reached of shortestPath.values()) {
-				if (reached.finalWalkingLegMinutes > 0) {
+				if (reached.arrivalTime.finalWalkingLegMinutes > 0) {
 					// Instead, walk from the nearest non-walking arrival.
 					continue;
 				}
 				const walkTime =
-					walkingMinutesBetween(reached.coordinate, landmarkCoordinate) + this.options.transferWalkingPenaltyMinutes;
+					walkingMinutesBetween(reached.arrivalTime.coordinate, landmarkCoordinate) + this.options.transferWalkingPenaltyMinutes;
 				const walkingArrival: ArrivalTime = {
-					arrivalMinutes: reached.arrivalMinutes,
-					finalWalkingLegMinutes: reached.finalWalkingLegMinutes + walkTime,
+					arrivalMinutes: reached.arrivalTime.arrivalMinutes,
+					finalWalkingLegMinutes: reached.arrivalTime.finalWalkingLegMinutes + walkTime,
 					coordinate: landmarkCoordinate,
 				};
 				if (walkingArrival.arrivalMinutes < shortestWalk.arrivalMinutes && walkTime < this.options.maxWalkMinutes) {
@@ -117,11 +136,11 @@ export class Pathfinder<K> {
 				}
 			}
 			if (shortestWalk.arrivalMinutes < this.options.maxJourneyMinutes && shortestWalk.finalWalkingLegMinutes < this.options.maxWalkMinutes) {
-				landmarkPaths.set(landmark, shortestWalk);
+				landmarkPaths.set(landmark, { arrivalTime: shortestWalk, edge: { tag: "walking" } });
 			}
 		}
 
-		return new Map<K | StationOffset, ArrivalTime>([...landmarkPaths, ...shortestPath]);
+		return new Map<K | StationOffset, Reachable>([...landmarkPaths, ...shortestPath]);
 	}
 }
 

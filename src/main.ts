@@ -133,7 +133,7 @@ async function generateInvertedIsoline(
 	const reachableFromOrigin = new Map<Origin, Map<unknown, ArrivalTime>>();
 	for (const [origin, _] of origins) {
 		const reachable = pathfinder.pathfindFrom(origin.coordinate);
-		reachableFromOrigin.set(origin, reachable);
+		reachableFromOrigin.set(origin, new Map([...reachable].map(([k, v]) => [k, v.arrivalTime])));
 	}
 
 	const reachableFromAllOrigins: Map<Origin, ArrivalTime>[] = [
