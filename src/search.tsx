@@ -49,7 +49,6 @@ export async function isolines(
 	},
 ): Promise<{ boundaries: Coordinate[][] }> {
 	const localPlane = LocalPlane.nearPoint(HACHIKO_COORDINATES);
-	console.log(arrivalTimes.length, "arrivalTimes");
 
 	const circles = [];
 	for (const arrivalTime of arrivalTimes) {

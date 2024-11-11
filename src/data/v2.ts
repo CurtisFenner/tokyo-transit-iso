@@ -49,8 +49,14 @@ export function circleCircleIntersections(a: Circle, b: Circle): V2[] {
 	};
 
 	return [
-		linearCombination([1, a.center], [u, baUnit], [h, baOrtho]),
-		linearCombination([1, a.center], [u, baUnit], [-h, baOrtho]),
+		{
+			x: a.center.x + u * baUnit.x + h * baOrtho.x,
+			y: a.center.y + u * baUnit.y + h * baOrtho.y,
+		},
+		{
+			x: a.center.x + u * baUnit.x - h * baOrtho.x,
+			y: a.center.y + u * baUnit.y - h * baOrtho.y,
+		},
 	];
 }
 
@@ -64,6 +70,14 @@ export function linearCombination(...pairs: [number, V2][]): V2 {
 	return { x, y };
 }
 
+function moveToUnitCircle(c: number) {
+	return (c + Math.PI * 8) % (Math.PI * 2);
+}
+
+function difference(a: number, b: number): number {
+	return a - b;
+}
+
 export function mergeCirclesIntoArcPaths(circles0: Circle[]): V2[][] {
 	const largestRadius = Math.max(1, ...circles0.map(c => c.radius));
 	const nearby0 = new Nearby<Circle>(2 * largestRadius + 1);
@@ -75,7 +89,7 @@ export function mergeCirclesIntoArcPaths(circles0: Circle[]): V2[][] {
 	const circles = [];
 	for (const circle of circles0) {
 		let covered = false;
-		for (const other of nearby0.queryWithin(circle.center, largestRadius + circle.radius)) {
+		for (const other of nearby0.queryWithin(circle.center)) {
 			if (other !== circle && doesCircleContainCircle(other, circle)) {
 				covered = true;
 				break;
@@ -89,7 +103,7 @@ export function mergeCirclesIntoArcPaths(circles0: Circle[]): V2[][] {
 
 	const out = [];
 	for (const circle of circles) {
-		const neighbors = [...nearby.queryWithin(circle.center, circle.radius + largestRadius)];
+		const neighbors = [...nearby.queryWithin(circle.center)];
 		let contained = false;
 		const rotate = 0 * Math.PI / 2;
 		const cutThetas = [0, 1, 2, 3, 4, 5, 6, 7].map(q => rotate + q / 8 * Math.PI * 2);
@@ -122,10 +136,7 @@ export function mergeCirclesIntoArcPaths(circles0: Circle[]): V2[][] {
 			continue;
 		}
 
-		const allCuts = [...new Set(
-			cutThetas.map(c => (c + Math.PI * 8) % (Math.PI * 2))
-				.sort((a, b) => a - b)
-		)];
+		const allCuts = [...new Set(cutThetas.map(moveToUnitCircle).sort(difference))];
 
 		const arcs: Arc[] = [];
 		for (let i = 0; i < allCuts.length; i++) {
@@ -139,10 +150,10 @@ export function mergeCirclesIntoArcPaths(circles0: Circle[]): V2[][] {
 			const midpointDirectionMagitude = Math.sqrt(
 				midpointDirection.x ** 2 + midpointDirection.y ** 2
 			);
-			const midpoint = linearCombination(
-				[1, circle.center],
-				[circle.radius / midpointDirectionMagitude, midpointDirection],
-			);
+			const midpoint = {
+				x: circle.center.x + circle.radius / midpointDirectionMagitude * midpointDirection.x,
+				y: circle.center.y + circle.radius / midpointDirectionMagitude * midpointDirection.y,
+			};
 
 			let isInside = false;
 			for (const cuttingNeighbor of cuttingNeighbors) {
@@ -169,7 +180,7 @@ export function mergeCirclesIntoArcPaths(circles0: Circle[]): V2[][] {
 
 	const identities = new Nearby<V2>(0.001);
 	function identify(p: V2): V2 {
-		const e = [...identities.queryWithin(p, 0.001)];
+		const e = identities.queryWithin(p);
 		if (e.length !== 0) {
 			return e[0];
 		}
@@ -180,10 +191,10 @@ export function mergeCirclesIntoArcPaths(circles0: Circle[]): V2[][] {
 	const edges = new Map<V2, { arcCenter: V2, other: V2 }[]>();
 	for (const arc of out.flat()) {
 		const [p0, p1] = [arc.theta0, arc.theta1].map(theta => {
-			return linearCombination(
-				[1, arc.circle.center],
-				[arc.circle.radius, { x: Math.cos(theta), y: Math.sin(theta) }],
-			);
+			return {
+				x: arc.circle.center.x + arc.circle.radius * Math.cos(theta),
+				y: arc.circle.center.y + arc.circle.radius * Math.sin(theta),
+			};
 		});
 
 		const i0 = identify(p0);
@@ -240,10 +251,20 @@ class Nearby<T> {
 		} else {
 			group.push(item);
 		}
+		this.cache.clear();
 	}
 
-	* queryWithin(point: V2, radius: number): Generator<T> {
+	private cache = new Map<number, T[]>();
+
+	queryWithin(point: V2): readonly T[] {
 		const { u: pu, v: pv } = this.tile(point);
+		const mainKey = this.key(pu, pv);
+		const cached = this.cache.get(mainKey);
+		if (cached !== undefined) {
+			return cached;
+		}
+
+		const out = [];
 		for (let u = pu - 1; u <= pu + 1; u++) {
 			for (let v = pv - 1; v <= pv + 1; v++) {
 				const group = this.map.get(this.key(u, v));
@@ -251,103 +272,12 @@ class Nearby<T> {
 					continue;
 				}
 				for (const item of group) {
-					if (distance(item.point, point) < radius) {
-						yield item.thing;
-					}
+					out.push(item.thing);
 				}
 			}
 		}
+
+		this.cache.set(mainKey, out);
+		return out;
 	}
-}
-
-const canvas = document.createElement("canvas");
-canvas.width = 1600;
-canvas.height = 800;
-canvas.style.position = "fixed";
-canvas.style.top = "5rem";
-canvas.style.left = "5rem";
-canvas.style.border = "3px solid gray";
-// canvas.style.background = "white";
-// document.body.appendChild(canvas);
-
-const ctx = canvas.getContext("2d")!;
-
-function drawArc(ctx: CanvasRenderingContext2D, arc: Arc) {
-	const forwardDistance = (arc.theta1 + Math.PI * 2 - arc.theta0) % (Math.PI * 2);
-	const backwardDistance = (arc.theta0 + Math.PI * 2 - arc.theta1) % (Math.PI * 2);
-	// ctx.arc(arc.circle.center.x, arc.circle.center.y, arc.circle.radius, arc.theta0, arc.theta1, backwardDistance > forwardDistance);
-
-	const p0 = linearCombination(
-		[1, arc.circle.center],
-		[arc.circle.radius, {
-			x: Math.cos(arc.theta0),
-			y: Math.sin(arc.theta0),
-		}],
-	);
-	const p1 = linearCombination(
-		[1, arc.circle.center],
-		[arc.circle.radius, {
-			x: Math.cos(arc.theta1),
-			y: Math.sin(arc.theta1),
-		}],
-	);
-
-	ctx.moveTo(p0.x, p0.y);
-	ctx.lineTo(p1.x, p1.y);
-}
-
-function drawCircle(ctx: CanvasRenderingContext2D, circle: Circle) {
-	ctx.moveTo(circle.center.x + circle.radius, circle.center.y);
-	ctx.arc(circle.center.x, circle.center.y, circle.radius, 0, Math.PI * 2);
-}
-
-const inputs: Circle[] = [
-	{
-		center: { x: 300, y: 400 },
-		radius: 300,
-	}, {
-		center: { x: 350, y: 400 },
-		radius: 300,
-	},
-];
-
-for (const input of inputs) {
-	ctx.lineWidth = 20;
-	ctx.strokeStyle = "#DDD";
-	ctx.beginPath();
-	drawCircle(ctx, input);
-	ctx.stroke();
-}
-
-const merged = mergeCirclesIntoArcPaths(inputs);
-for (let i = 0; i < merged.length; i++) {
-	ctx.beginPath();
-	ctx.lineWidth = 2;
-	const hue = 360 * i / (merged.length);
-	ctx.strokeStyle = `hsl(${hue.toFixed(0)}deg 100% 50%)`;
-
-	ctx.beginPath();
-	ctx.moveTo(merged[i][0].x, merged[i][0].y);
-	for (let k = 1; k < merged[i].length; k++) {
-		ctx.lineTo(merged[i][k].x, merged[i][k].y);
-	}
-	ctx.closePath();
-	ctx.stroke();
-
-	// ctx.fillStyle = ctx.strokeStyle;
-	// for (const arc of merged[i]) {
-	// 	ctx.beginPath();
-	// 	for (const theta of [arc.theta0, arc.theta1]) {
-	// 		const p = linearCombination(
-	// 			[1, arc.circle.center],
-	// 			[arc.circle.radius, {
-	// 				x: Math.cos(theta),
-	// 				y: Math.sin(theta),
-	// 			}],
-	// 		);
-	// 		ctx.moveTo(p.x, p.y);
-	// 		ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-	// 	}
-	// 	ctx.fill();
-	// }
 }
