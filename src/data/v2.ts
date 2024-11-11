@@ -178,7 +178,7 @@ export function mergeCirclesIntoArcPaths(circles0: Circle[]): V2[][] {
 		}
 	}
 
-	const identities = new Nearby<V2>(0.001);
+	const identities = new Nearby<V2>(0.00001);
 	function identify(p: V2): V2 {
 		const e = identities.queryWithin(p);
 		if (e.length !== 0) {
