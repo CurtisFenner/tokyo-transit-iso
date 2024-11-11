@@ -1,7 +1,6 @@
 import { earthGreatCircleDistanceKm, STANDARD_WALKING_SPEED_KPH } from "./geometry";
 import { loadLineLogos } from "./images";
 import { loadWikidata, Wikidata } from "./matchstations";
-import { loadMatrices } from "./search";
 import * as spatial from "./data/spatial";
 
 class WalkingData {
@@ -78,6 +77,15 @@ function walkingMatrix(
 	}
 
 	return walkingTransfers;
+}
+
+async function loadMatrices(): Promise<Matrices> {
+	const fet = fetch("generated/morning-matrix.json.gze");
+	const f = await fet;
+	const gzipBlob = await f.blob();
+	const decompressedStream = gzipBlob.stream().pipeThrough(new DecompressionStream("gzip"));
+	const decompressedBlob = await new Response(decompressedStream).json();
+	return decompressedBlob as Matrices;
 }
 
 export async function loadTransitData(
