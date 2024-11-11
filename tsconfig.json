@@ -12,11 +12,9 @@
 			"ES2020",
 			"DOM",
 			"DOM.Iterable"
-		],
-		"jsx": "react-jsx",
+		]
 	},
 	"include": [
 		"src/**/*.ts",
-		"src/**/*.tsx",
 	]
 }
