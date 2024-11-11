@@ -90,9 +90,14 @@ async function generateInvertedIsolines(
 	},
 	properties: {},
 }> {
+	const blendedArrivals = generateBlendedArrivalMap(transitData, origins, {
+		maxWalkMinutes: options.maxWalkMinutes,
+		maxJourneyMinutes: Math.max(...options.maxJourneyMinutes),
+	});
+
 	const coordinates = [];
 	for (const max of options.maxJourneyMinutes) {
-		const line = await generateInvertedIsoline(transitData, origins, {
+		const line = await generateInvertedIsoline(blendedArrivals, {
 			maxWalkMinutes: options.maxWalkMinutes,
 			maxJourneyMinutes: max,
 		});
@@ -109,21 +114,14 @@ async function generateInvertedIsolines(
 	};
 }
 
-async function generateInvertedIsoline(
+function generateBlendedArrivalMap(
 	transitData: TransitData,
 	origins: Map<Origin, number>,
 	options: {
 		maxWalkMinutes: number,
 		maxJourneyMinutes: number,
 	},
-): Promise<{
-	type: "Feature",
-	geometry: {
-		type: "MultiPolygon",
-		coordinates: [lon: number, lat: number][][][],
-	},
-	properties: {},
-}> {
+): ArrivalTime[] {
 	const pathfinder = new Pathfinder<Origin>(transitData, new Map([...origins.keys()].map(o => [o, o.coordinate])), {
 		...options,
 		trainTransferPenaltyMinutes: 3,
@@ -150,7 +148,23 @@ async function generateInvertedIsoline(
 		);
 		blendedArrivals.push(blendedArrival);
 	}
+	return blendedArrivals;
+}
 
+async function generateInvertedIsoline(
+	blendedArrivals: ArrivalTime[],
+	options: {
+		maxWalkMinutes: number,
+		maxJourneyMinutes: number,
+	},
+): Promise<{
+	type: "Feature",
+	geometry: {
+		type: "MultiPolygon",
+		coordinates: [lon: number, lat: number][][][],
+	},
+	properties: {},
+}> {
 	const rings = await timer.timed("isolines", () => isolines(blendedArrivals, options));
 
 	const geojson = geoJSONFromRingForest(

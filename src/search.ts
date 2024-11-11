@@ -27,13 +27,15 @@ export async function isolines(
 		);
 		const radiusKm = walkingMinutes * STANDARD_WALKING_SPEED_KPH / 60;
 
-		circles.push({
-			center: {
-				x: localCoordinate.xKm,
-				y: localCoordinate.yKm,
-			},
-			radius: radiusKm,
-		});
+		if (radiusKm > 0) {
+			circles.push({
+				center: {
+					x: localCoordinate.xKm,
+					y: localCoordinate.yKm,
+				},
+				radius: radiusKm,
+			});
+		}
 	}
 
 	const merged = v2.mergeCirclesIntoArcPaths(circles);
