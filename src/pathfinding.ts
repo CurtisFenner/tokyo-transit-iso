@@ -10,7 +10,7 @@ export type PathEdge = {
 	train: { label: TrainLabel, from: StationOffset },
 };
 
-type Reachable = { arrivalTime: ArrivalTime, edge: PathEdge };
+export type Reachable = { arrivalTime: ArrivalTime, edge: PathEdge };
 
 export class Pathfinder<K> {
 	constructor(

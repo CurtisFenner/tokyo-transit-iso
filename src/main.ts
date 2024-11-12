@@ -4,12 +4,12 @@ import { GeojsonSourcesManager } from "./components/GeojsonSourcesManager";
 import { Refreshing, Stabilizing, zipKeyedMapsTotal } from "./data/data";
 import { geoJSONFromRingForest, groupContainedRings } from "./data/spatial";
 import * as timer from "./data/timer";
+import { earthGreatCircleDistanceKm } from "./geometry";
 import { cleanStationName, HACHIKO_COORDINATES } from "./matchstations";
-import { blendArrivals, Pathfinder } from "./pathfinding";
+import { searchForPlace } from "./nomin";
+import { blendArrivals, Pathfinder, Reachable } from "./pathfinding";
 import { ArrivalTime, isolines } from "./search";
 import { loadTransitData, TransitData } from "./transit-data";
-import { searchForPlace } from "./nomin";
-import { earthGreatCircleDistanceKm } from "./geometry";
 
 const TOKYO_BOUNDS: [{ lng: number, lat: number }, { lng: number, lat: number }] = [
 	Object.freeze({
@@ -76,8 +76,7 @@ for (const collapser of document.body.getElementsByClassName("collapser")) {
 export type Origin = { coordinate: Coordinate };
 
 async function generateInvertedIsolines(
-	transitData: TransitData,
-	origins: Map<Origin, number>,
+	blendedArrivals: BlendedArrivals,
 	options: {
 		maxWalkMinutes: number,
 		maxJourneyMinutes: number[],
@@ -90,14 +89,9 @@ async function generateInvertedIsolines(
 	},
 	properties: {},
 }> {
-	const blendedArrivals = generateBlendedArrivalMap(transitData, origins, {
-		maxWalkMinutes: options.maxWalkMinutes,
-		maxJourneyMinutes: Math.max(...options.maxJourneyMinutes),
-	});
-
 	const coordinates = [];
 	for (const max of options.maxJourneyMinutes) {
-		const line = await generateInvertedIsoline(blendedArrivals, {
+		const line = await generateInvertedIsoline(blendedArrivals.arrivalTimes, {
 			maxWalkMinutes: options.maxWalkMinutes,
 			maxJourneyMinutes: max,
 		});
@@ -114,6 +108,11 @@ async function generateInvertedIsolines(
 	};
 }
 
+export type BlendedArrivals = {
+	arrivalTimes: ArrivalTime[],
+	trainEdges: Map<StationOffset, { from: StationOffset, label: TrainLabel } | null>,
+};
+
 function generateBlendedArrivalMap(
 	transitData: TransitData,
 	origins: Map<Origin, number>,
@@ -121,34 +120,59 @@ function generateBlendedArrivalMap(
 		maxWalkMinutes: number,
 		maxJourneyMinutes: number,
 	},
-): ArrivalTime[] {
+): BlendedArrivals {
 	const pathfinder = new Pathfinder<Origin>(transitData, new Map([...origins.keys()].map(o => [o, o.coordinate])), {
 		...options,
 		trainTransferPenaltyMinutes: 3,
 		transferWalkingPenaltyMinutes: 3,
 	});
 
-	const reachableFromOrigin = new Map<Origin, Map<unknown, ArrivalTime>>();
+	type Destination = Origin | StationOffset;
+	const reachableFromOrigin = new Map<Origin, Map<Destination, Reachable>>();
 	for (const [origin, _] of origins) {
-		const reachable = pathfinder.pathfindFrom(origin.coordinate);
-		reachableFromOrigin.set(origin, new Map([...reachable].map(([k, v]) => [k, v.arrivalTime])));
+		const reachable: Map<Destination, Reachable> =
+			pathfinder.pathfindFrom(origin.coordinate);
+		reachableFromOrigin.set(origin, new Map([...reachable].map(([k, v]) => [k, v])));
 	}
 
-	const reachableFromAllOrigins: Map<Origin, ArrivalTime>[] = [
-		...zipKeyedMapsTotal(reachableFromOrigin)
-			.values()
-	];
+	const reachableFromAllOrigins: Map<Destination, Map<Origin, Reachable>> =
+		zipKeyedMapsTotal(reachableFromOrigin);
+
+
+	// Associate each station destination with the "train edge" which is
+	// used to reach it.
+	const trainEdges = new Map<StationOffset, { label: TrainLabel, from: StationOffset } | null>();
+	for (const [destination, reachables] of reachableFromAllOrigins) {
+		if (typeof destination !== "number") {
+			continue;
+		}
+
+		const labels = [];
+		for (const [origin, reachable] of reachables) {
+			const originWeight = origins.get(origin)!;
+			const score = reachable.arrivalTime.arrivalMinutes / Math.sqrt(originWeight);
+			labels.push({
+				score,
+				train: reachable.edge.tag === "train"
+					? reachable.edge.train
+					: null,
+			});
+		}
+
+		const train = labels.sort((a, b) => b.score - a.score)[0].train;
+		trainEdges.set(destination, train);
+	}
 
 	const blendedArrivals: ArrivalTime[] = [];
-	for (const reached of reachableFromAllOrigins) {
+	for (const reached of reachableFromAllOrigins.values()) {
 		const blendedArrival = blendArrivals(
 			new Map(
-				[...reached].map(([origin, arrival]) => [arrival, origins.get(origin)!])
+				[...reached].map(([origin, reachable]) => [reachable.arrivalTime, origins.get(origin)!])
 			)
 		);
 		blendedArrivals.push(blendedArrival);
 	}
-	return blendedArrivals;
+	return { arrivalTimes: blendedArrivals, trainEdges };
 }
 
 async function generateInvertedIsoline(
@@ -352,7 +376,13 @@ async function main() {
 				for (const place of req.origins) {
 					origins.set(place, place.weight);
 				}
-				return await generateInvertedIsolines(transitData, origins, req.options);
+
+				const blendedArrivals = generateBlendedArrivalMap(transitData, origins, {
+					maxWalkMinutes: req.options.maxWalkMinutes,
+					maxJourneyMinutes: Math.max(...req.options.maxJourneyMinutes),
+				});
+
+				return await generateInvertedIsolines(blendedArrivals, req.options);
 			});
 		}
 	};
@@ -422,6 +452,37 @@ async function main() {
 			"line-blur": 8,
 			"line-offset": -2,
 			"line-opacity": 0.25,
+		},
+	});
+
+	const trainArcsSource = "source-train-arcs";
+
+	map.addSource(trainArcsSource, {
+		type: "geojson",
+		lineMetrics: true,
+		data: {
+			type: "FeatureCollection",
+			features: [],
+		},
+	});
+
+	map.addLayer({
+		id: "train-arcs",
+		type: "line",
+		source: trainArcsSource,
+		layout: {
+			"line-cap": "round",
+			"line-join": "round",
+		},
+		paint: {
+			"line-color": ["get", "train-color"],
+			"line-width": [
+				"interpolate",
+				["linear"],
+				0, 0,
+				0.5, 5,
+				1, 0,
+			],
 		},
 	});
 
