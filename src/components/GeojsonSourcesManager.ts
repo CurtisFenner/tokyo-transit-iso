@@ -57,20 +57,6 @@ export class GeojsonSourcesManager<T> {
 
 		if (this.dataset.get(id) === lease) {
 			this.updateSourceGeometry(id, newGeoJSON);
-			this.sourceRefreshed(id, newGeoJSON, t);
 		}
-	}
-
-	deleteSource(id: string) {
-		if (!this.dataset.has(id)) {
-			throw new Error("id `" + id + "` not defined");
-		}
-		this.dataset.delete(id);
-		this.map.removeLayer(`isolines-fill-${id}`);
-		this.map.removeLayer(`isolines-line-${id}`);
-		this.map.removeSource(`isoline-source-${id}`);
-	}
-
-	protected sourceRefreshed(id: string, data: Readonly<GeoJSON.Feature>, t: T): void {
 	}
 }
