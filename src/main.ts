@@ -1,6 +1,5 @@
 import * as maplibregl from "maplibre-gl";
 import { ClusteredLabels } from "./components/ClusteredLabels";
-import { GeojsonSourcesManager } from "./components/GeojsonSourcesManager";
 import { Refreshing, Stabilizing, zipKeyedMapsTotal } from "./data/data";
 import { geoJSONFromRingForest, groupContainedRings } from "./data/spatial";
 import * as timer from "./data/timer";
@@ -314,6 +313,15 @@ function addPlaceToState(
 	rerender();
 }
 
+const BLANK_GEOJSON: GeoJSON.GeoJSON = {
+	type: "Feature",
+	geometry: {
+		type: "MultiPolygon",
+		coordinates: [],
+	},
+	properties: {},
+}
+
 async function main() {
 	const loadTimeline = new timer.Timeline();
 	const mapLoad = loadTimeline.start("load map");
@@ -369,31 +377,64 @@ async function main() {
 			},
 		});
 
-	const shadelayers = new class Foo extends GeojsonSourcesManager<{ origins: PlaceState[], options: { maxWalkMinutes: number, maxJourneyMinutes: number[] } }> {
-		constructor() {
-			super(map, async (req: { origins: PlaceState[], options: { maxWalkMinutes: number, maxJourneyMinutes: number[] } }) => {
-				const origins = new Map();
-				for (const place of req.origins) {
-					origins.set(place, place.weight);
-				}
+	const ISO_OUTER_SOURCE_ID = "iso-outer-source";
+	const ISO_INNER_SOURCE_ID = "iso-inner-source";
 
-				const blendedArrivals = generateBlendedArrivalMap(transitData, origins, {
-					maxWalkMinutes: req.options.maxWalkMinutes,
-					maxJourneyMinutes: Math.max(...req.options.maxJourneyMinutes),
-				});
+	map.addSource(ISO_INNER_SOURCE_ID, {
+		type: "geojson",
+		lineMetrics: true,
+		data: BLANK_GEOJSON,
+	});
 
-				return await generateInvertedIsolines(blendedArrivals, req.options);
+	map.addSource(ISO_OUTER_SOURCE_ID, {
+		type: "geojson",
+		lineMetrics: true,
+		data: BLANK_GEOJSON,
+	});
+
+	const isolineRenderer = new Refreshing(
+		async (req: {
+			origins: PlaceState[],
+			options: { maxWalkMinutes: number, maxJourneyMinutes: number },
+		}) => {
+			const origins = new Map();
+			for (const place of req.origins) {
+				origins.set(place, place.weight);
+			}
+			const innerIsovalues = [];
+			for (let minute = 15; minute + 3.51 < req.options.maxJourneyMinutes; minute += 15) {
+				innerIsovalues.push(minute);
+			}
+
+			const blendedArrivals = generateBlendedArrivalMap(transitData, origins, {
+				maxWalkMinutes: req.options.maxWalkMinutes,
+				maxJourneyMinutes: req.options.maxJourneyMinutes,
 			});
-		}
-	};
 
-	const isoSourceIDBasic = shadelayers.createSource("basic");
-	const isoSourceInner = shadelayers.createSource("inner");
+			const outerGeojson = await generateInvertedIsolines(blendedArrivals, {
+				...req.options,
+				maxJourneyMinutes: [req.options.maxJourneyMinutes],
+			});
+
+			const innerGeojson = await generateInvertedIsolines(blendedArrivals, {
+				...req.options,
+				maxJourneyMinutes: innerIsovalues,
+			});
+			return { innerGeojson, outerGeojson };
+		},
+		({ innerGeojson, outerGeojson }) => {
+			const innerSource = map.getSource(ISO_INNER_SOURCE_ID) as maplibregl.GeoJSONSource;
+			innerSource.setData(innerGeojson);
+
+			const outerSource = map.getSource(ISO_OUTER_SOURCE_ID) as maplibregl.GeoJSONSource;
+			outerSource.setData(outerGeojson);
+		},
+	);
 
 	map.addLayer({
 		id: Math.random().toString(),
 		type: "fill",
-		source: isoSourceIDBasic,
+		source: ISO_OUTER_SOURCE_ID,
 		paint: {
 			"fill-color": "gray",
 			"fill-opacity": 0.9,
@@ -403,7 +444,7 @@ async function main() {
 	map.addLayer({
 		id: Math.random().toString(),
 		type: "line",
-		source: isoSourceIDBasic,
+		source: ISO_OUTER_SOURCE_ID,
 		layout: {
 			"line-cap": "round",
 			"line-join": "round",
@@ -417,7 +458,7 @@ async function main() {
 	map.addLayer({
 		id: Math.random().toString(),
 		type: "line",
-		source: isoSourceIDBasic,
+		source: ISO_OUTER_SOURCE_ID,
 		paint: {
 			"line-color": "black",
 			"line-width": 8,
@@ -429,7 +470,7 @@ async function main() {
 	map.addLayer({
 		id: "inner-line",
 		type: "line",
-		source: isoSourceInner,
+		source: ISO_INNER_SOURCE_ID,
 		layout: {
 			"line-cap": "round",
 			"line-join": "round",
@@ -445,7 +486,7 @@ async function main() {
 	map.addLayer({
 		id: "inner-inset-blur",
 		type: "line",
-		source: isoSourceInner,
+		source: ISO_INNER_SOURCE_ID,
 		paint: {
 			"line-color": "black",
 			"line-width": 8,
@@ -509,25 +550,9 @@ async function main() {
 		const maxJourneyMinutes = parseFloat(settingsMaxCommuteInput.value);
 		const maxWalkMinutes = parseFloat(settingsWalkInput.value);
 
-		shadelayers.recalculateSourceGeometry("basic", {
+		isolineRenderer.update({
 			origins,
-			options: {
-				maxJourneyMinutes: [maxJourneyMinutes],
-				maxWalkMinutes: maxWalkMinutes,
-			},
-		});
-
-		const values = [];
-		for (let minute = 15; minute + 3.51 < maxJourneyMinutes; minute += 15) {
-			values.push(minute);
-		}
-
-		shadelayers.recalculateSourceGeometry("inner", {
-			origins,
-			options: {
-				maxJourneyMinutes: values,
-				maxWalkMinutes: maxWalkMinutes,
-			},
+			options: { maxJourneyMinutes, maxWalkMinutes },
 		});
 	}
 
