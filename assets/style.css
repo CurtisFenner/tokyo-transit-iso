@@ -48,14 +48,13 @@ h2 {
 	top: 0;
 	right: 0;
 	bottom: 0;
-	max-width: 1000px;
 	width: 100%;
+	max-width: 50%;
+
 	display: flex;
-	flex-direction: row;
-	flex-wrap: wrap;
-	justify-content: flex-end;
-	/* align-items: stretch;
-	align-content: stretch; */
+	flex-direction: column;
+	justify-content: flex-start;
+
 	--gap: 0.4rem;
 	--search-height: 3em;
 	padding: var(--gap);
@@ -67,8 +66,13 @@ h2 {
 }
 
 .over-search-container {
-	flex: 1 1 0;
-	min-width: 16em;
+	flex: 0 0 1;
+}
+
+.over-details-container {
+	pointer-events: initial;
+	overflow-y: auto;
+	flex: 1 0 1;
 }
 
 .over-search-bar {
@@ -77,6 +81,34 @@ h2 {
 	height: var(--search-height);
 
 	pointer-events: initial;
+	margin-bottom: var(--gap);
+}
+
+@media only screen and (min-width: 88rem) {
+	/* On wide (desktop) screens, limit the floating controls to 44rem wide */
+	.over-container {
+		max-width: 44rem;
+	}
+}
+
+@media only screen and (max-width: 60rem) {
+	/* On narrow (mobile) screens, make the containers fill the whole screen
+	 * horizontally */
+	.over-container {
+		max-width: 100%;
+	}
+
+	/* But make the details only fill the bottom 40% of the screen, leaving
+	* a large gap between the search bar and the details for the map */
+	.over-container {
+		justify-content: space-between;
+
+		/* Leave space for the map attribution (34px tall including padding) */
+		margin-bottom: 2.125rem;
+	}
+	.over-details-container {
+		max-height: 40%;
+	}
 }
 
 .search-results {
@@ -96,14 +128,6 @@ h2 {
 .search-result {
 	display: block;
 	padding: var(--panel-padding);
-}
-
-.over-details-container {
-	min-width: 24em;
-	flex: 1 1 0;
-
-	pointer-events: initial;
-	overflow-y: auto;
 }
 
 .plastic {
@@ -159,22 +183,6 @@ button.dotted {
 	border-radius: 0.2rem;
 }
 
-.main-sliding-collapsible {
-	position: fixed;
-	--arrow-margin: 4.5rem;
-	--full-width: 35rem;
-	right: 0;
-	top: 0;
-	bottom: 0;
-	width: var(--full-width);
-	user-select: none;
-	transition: right 0.5s ease-in-out;
-}
-
-.main-sliding-collapsible.collapsed {
-	right: calc(var(--arrow-margin) + 0.25rem - var(--full-width));
-}
-
 .main-panel {
 	position: relative;
 	user-select: text;
@@ -183,57 +191,10 @@ button.dotted {
 	height: 100%;
 }
 
-@media only screen and (max-width: 43rem) {
-	.main-sliding-collapsible {
-		--full-width: calc(100vw - 2 * var(--arrow-margin));
-	}
-}
-
-img.sliced {
-	object-position: var(--slice-top) var(--slice-left);
-	object-fit: none;
-}
-
-.collapsed .collapser {
-	transform: rotate(180deg);
-}
-
-.collapser {
-	width: var(--arrow-margin);
-	height: var(--arrow-margin);
-	font-family: inherit;
-	font-size: 2rem;
-	line-height: var(--arrow-margin);
-	padding: 0;
-	margin: 0;
-	text-align: center;
-
-	transform: rotate(0deg);
-
-	position: absolute;
-	left: 0;
-	top: 0;
-	user-select: none;
-	transition: transform 0.5s ease-in-out;
-}
-
-.collapser:disabled {
-	color: gray;
-}
 
 .unclickable {
 	pointer-events: none;
 	user-select: none;
-}
-
-.train-station-label {
-	background: #FFFD;
-	box-shadow: black 0 0 4px -1px;
-	border-radius: 4px;
-	font-size: 12px;
-	font-weight: bold;
-	padding: 0.25em;
-	line-height: 1em;
 }
 
 .section-hr {
@@ -257,4 +218,15 @@ img.sliced {
 	font-variant: small-caps;
 	padding-left: 0.5em;
 	padding-right: 0.5em;
+}
+
+/** Map elements */
+.train-station-label {
+	background: #FFFD;
+	box-shadow: black 0 0 4px -1px;
+	border-radius: 4px;
+	font-size: 12px;
+	font-weight: bold;
+	padding: 0.25em;
+	line-height: 1em;
 }

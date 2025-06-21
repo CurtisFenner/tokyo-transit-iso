@@ -51,27 +51,6 @@ map.touchZoomRotate.disableRotation();
 map.keyboard.disableRotation();
 map.dragRotate.disable();
 
-function collapsibleAbove(e: HTMLElement): HTMLElement {
-	if (e.classList.contains("collapsible")) {
-		return e;
-	} else if (!e.parentElement) {
-		throw new Error("collapser does not have a .collapsible ancestor");
-	} else {
-		return collapsibleAbove(e.parentElement);
-	}
-}
-
-for (const collapser of document.body.getElementsByClassName("collapser")) {
-	if (!(collapser instanceof HTMLButtonElement)) {
-		throw new Error("collapser class should only be applied to buttons");
-	}
-	collapser.onclick = () => {
-		const collapsible = collapsibleAbove(collapser);
-		collapsible.classList.toggle("collapsed");
-	};
-	collapser.disabled = false;
-}
-
 export type Origin = { coordinate: Coordinate };
 
 async function generateInvertedIsolines(
