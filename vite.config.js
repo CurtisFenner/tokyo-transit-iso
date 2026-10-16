@@ -6,4 +6,5 @@ export default defineConfig({
 			input: ["index.html"],
 		},
 	},
+	base: "/tokyo-transit-iso/",
 })
