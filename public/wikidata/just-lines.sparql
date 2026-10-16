@@ -1,0 +1,19 @@
+SELECT DISTINCT
+  ?line
+  ?line_en
+  ?line_ja
+  ?line_color
+  ?line_code
+WHERE {
+  wd:Q728937 ^wdt:P279*/^wdt:P31 ?line .
+  ?line wdt:P17 wd:Q17
+  # Exclude state-of-use=decommissioned lines
+  FILTER NOT EXISTS { ?line wdt:P5817 wd:Q11639308 }.
+
+  OPTIONAL { ?line wdt:P154 ?line_logo }
+  OPTIONAL { ?line wdt:P1671 ?line_code }
+  OPTIONAL { ?line wdt:P465 ?line_color }
+
+  OPTIONAL { ?line rdfs:label ?line_en filter (lang(?line_en) = "en") }.
+  OPTIONAL { ?line rdfs:label ?line_ja filter (lang(?line_ja) = "ja") }.
+}

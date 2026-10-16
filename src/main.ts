@@ -226,6 +226,8 @@ const placeListDiv = document.getElementById("place-list-div")!;
 const settingsMaxCommuteInput = document.getElementById("settings-max-commute-input") as HTMLInputElement;
 const settingsWalkInput = document.getElementById("settings-walk-input") as HTMLInputElement;
 
+const settingsShowTrainLinesInput = document.getElementById("settings-show-train-lines") as HTMLInputElement;
+
 function addPlaceToState(
 	state: PlaceState,
 	rerender: (mode?: "cheap") => void,
@@ -477,12 +479,33 @@ async function main() {
 
 	const trainArcsSource = "source-train-arcs";
 
+	const trainArcsFeatures = [];
+	for (const line of transitData.lines) {
+		const wikiLine = transitData.wikidata.matchedLines.get(line);
+		trainArcsFeatures.push({
+			type: "Feature",
+			properties: {
+				"train-color": wikiLine?.color ?
+					`#${wikiLine.color}`
+					: "gray",
+			},
+			geometry: {
+				type: "LineString",
+				coordinates: line.stops
+					.map(stopIndex => transitData.stations[stopIndex])
+					.filter(x => x)
+					.map(x => x.coordinate)
+					.map(x => [x.lon, x.lat]),
+			},
+		} as const);
+	}
+
 	map.addSource(trainArcsSource, {
 		type: "geojson",
 		lineMetrics: true,
 		data: {
 			type: "FeatureCollection",
-			features: [],
+			features: trainArcsFeatures,
 		},
 	});
 
@@ -496,13 +519,7 @@ async function main() {
 		},
 		paint: {
 			"line-color": ["get", "train-color"],
-			"line-width": [
-				"interpolate",
-				["linear"],
-				0, 0,
-				0.5, 5,
-				1, 0,
-			],
+			"line-width": 4,
 		},
 	});
 
@@ -544,6 +561,15 @@ async function main() {
 	settingsWalkInput.value = (parseFloat(queryParameters.get("walk")!) || 15).toFixed(0);
 	settingsWalkInput.addEventListener("change", () => rerenderIsolines());
 	settingsWalkInput.disabled = false;
+
+	settingsShowTrainLinesInput.addEventListener("change", () => {
+		map.setLayoutProperty(
+			"train-arcs",
+			"visibility",
+			settingsShowTrainLinesInput.checked ? "visible" : "none",
+		);
+	});
+	settingsShowTrainLinesInput.disabled = false;
 
 	const placeParameters = [...queryParameters]
 		.filter(([key]) => /^p[0-9]*/.test(key))
