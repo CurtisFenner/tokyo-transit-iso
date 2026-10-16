@@ -1,7 +1,6 @@
-import { earthGreatCircleDistanceKm, STANDARD_WALKING_SPEED_KPH } from "./geometry";
-import { loadLineLogos } from "./images";
-import { loadWikidata, Wikidata } from "./matchstations";
 import * as spatial from "./data/spatial";
+import { earthGreatCircleDistanceKm, STANDARD_WALKING_SPEED_KPH } from "./geometry";
+import { loadWikidata, Wikidata } from "./matchstations";
 
 class WalkingData {
 	constructor(
@@ -95,15 +94,11 @@ export async function loadTransitData(
 	wikidata.matchStations(matrices.stations);
 	wikidata.matchLines(matrices);
 
-	const wikiLineLogos = await loadLineLogos();
-	const matrixLineLogos = [];
 	for (const line of matrices.lines) {
 		const matched = wikidata.matchedLines.get(line);
 		if (!matched) {
-			matrixLineLogos.push(undefined);
 			continue;
 		}
-		matrixLineLogos.push(wikiLineLogos.rectangles[matched.qID]);
 	}
 
 	return {
